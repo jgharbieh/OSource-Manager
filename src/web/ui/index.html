@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSource-Manager</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="kicker">Phase 4 · MCP tools + registrar</span>
+    <h1>OSource-Manager</h1>
+    <p>See it, try it, keep it or kill it. Every tool on this machine, in one place, with a journal.</p>
+  </header>
+
+  <div class="funnel" id="funnel">
+    <div class="stage"><span class="n">01</span><span class="cnt" id="fn-wanted">·</span><b>Wanted</b><span class="d">Tracked only. May not be on disk.</span></div>
+    <div class="stage"><span class="n">02</span><span class="cnt" id="fn-trying">·</span><b>Trying</b><span class="d">Verdict: giving it a shot.</span></div>
+    <div class="stage"><span class="n">03</span><span class="cnt" id="fn-kept">·</span><b>Kept</b><span class="d">Earned its place.</span></div>
+    <div class="stage"><span class="n">04</span><span class="cnt" id="fn-serving">·</span><b>Serving</b><span class="d">Registered as MCP in ≥1 agent.</span></div>
+    <div class="stage"><span class="n">05</span><span class="cnt zero" id="fn-retired">·</span><b>Retired</b><span class="d">Killed with the reason kept.</span></div>
+  </div>
+
+  <div class="app">
+    <div class="bar">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="tabs" id="viewtabs">
+        <button class="tab on" data-view="manage">Manage</button>
+        <button class="tab" data-view="browse">Browse</button>
+        <button class="tab" data-view="settings">Settings</button>
+      </span>
+      <span class="spacer"></span>
+      <span class="mono" id="stamp">refreshed —</span>
+      <button class="btn gho ico" id="refresh" title="Re-scan disk, package managers, configs, feeds">↻</button>
+    </div>
+
+    <!-- ==================== MANAGE ==================== -->
+    <div class="view" id="view-manage">
+      <div class="paste">
+        <span class="lbl">Add</span>
+        <input class="fld" id="addurl" placeholder="https://github.com/owner/repo — or npm:pkg" spellcheck="false" aria-label="Repo URL">
+        <input class="fld" id="addwhy" placeholder="why do you want it? (optional)" spellcheck="false" aria-label="Why">
+        <button class="btn pri" id="trackbtn">Track</button>
+        <button class="btn" disabled title="Phase 3 — guarded Docker trials">Try in Docker</button>
+        <button class="btn" disabled title="Phase 3 — clone + install">Clone + install</button>
+      </div>
+
+      <div class="fbar" id="fbar">
+        <span class="lbl">filters</span>
+        <span class="spacer"></span>
+        <button class="btn gho" id="palbtn"><kbd>Ctrl</kbd><kbd>K</kbd> search</button>
+      </div>
+
+      <div class="tw">
+        <table>
+          <thead><tr>
+            <th>Tool</th><th>Links</th><th>State</th><th>Version</th><th>Upstream</th><th>Last seen</th><th style="text-align:right">Do</th>
+          </tr></thead>
+          <tbody id="rows">
+            <tr><td colspan="7" class="rowmsg">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="det hidden" id="det">
+        <div class="det-l">
+          <h3 id="det-head">—</h3>
+          <button class="detx" id="det-close" title="Close (or click the row again)" aria-label="Close detail">✕</button>
+          <div class="dtabs" id="dtabs">
+            <button class="dtab on" data-p="details">Details</button>
+            <button class="dtab" data-p="readme">Readme</button>
+            <button class="dtab" data-p="changelog">Changelog</button>
+            <button class="dtab" data-p="run">Run</button>
+            <button class="dtab" data-p="log">Log</button>
+            <button class="dtab" data-p="comments">Comments <em id="ccount">0</em></button>
+            <span class="spacer"></span>
+            <button class="auto" id="autoupd" aria-pressed="false"><span class="box"></span>Auto update</button>
+          </div>
+
+          <div id="pane-details"></div>
+
+          <div class="hidden" id="pane-readme">
+            <span class="lbl">README.md — from the repo</span>
+            <div class="placeholder" style="margin-top:6px">Readme fetch ships in <b>Phase 2</b> — read-only intelligence over the repo.</div>
+          </div>
+
+          <div class="hidden" id="pane-changelog">
+            <span class="lbl">Changelog — since your version</span>
+            <div class="placeholder" style="margin-top:6px" id="changelog-body">Open this tab to check upstream.</div>
+          </div>
+
+          <div class="hidden" id="pane-run">
+            <span class="lbl">Run command — read from the repo, not typed by you</span>
+            <div class="placeholder" style="margin-top:6px" id="run-body">Open this tab to plan a trial run.</div>
+          </div>
+
+          <div class="hidden" id="pane-log">
+            <span class="lbl">Trial log — docker logs, read-only</span>
+            <div class="placeholder" style="margin-top:6px" id="log-body">Open this tab to read the trial container's log.</div>
+          </div>
+
+          <div class="hidden" id="pane-comments">
+            <span class="lbl">Comments — why, over time</span>
+            <div class="cbox" style="margin-top:6px">
+              <input class="fld" id="cin" placeholder="Why does this matter? (enter to post)" aria-label="Add comment">
+              <button class="btn pri" id="cpost">Post</button>
+            </div>
+            <div class="stream" id="cstream"></div>
+          </div>
+
+          <div class="acts" id="det-acts"></div>
+        </div>
+        <aside class="det-r" id="det-aside"></aside>
+      </div>
+    </div>
+
+    <!-- ==================== BROWSE ==================== -->
+    <div class="view hidden" id="view-browse">
+      <div class="srcbar">
+        <button class="src on" disabled title="Phase 4">🐳 Docker MCP</button>
+        <button class="src" disabled title="Phase 4">✳ Anthropic skills</button>
+        <button class="src" disabled title="Phase 4">◆ Community skills</button>
+        <button class="src" disabled title="Phase 4">⎇ GitHub</button>
+        <span class="spacer"></span>
+        <input class="fld" placeholder="filter…" spellcheck="false" aria-label="Filter catalog" disabled title="Phase 4">
+      </div>
+      <div class="placeholder">Live catalog browse ships in <b>Phase 4</b> — catalogs are queried live, never mirrored. Manage is your stuff; Browse is everyone else's.</div>
+    </div>
+
+    <!-- ==================== SETTINGS ==================== -->
+    <div class="view hidden" id="view-settings">
+      <form class="sform" id="sform">
+        <div class="srow">
+          <span class="lbl">Scan dirs — one per line</span>
+          <textarea id="s-scandirs" spellcheck="false"></textarea>
+        </div>
+        <div class="srow">
+          <span class="lbl">Skills dirs — one per line</span>
+          <textarea id="s-skillsdirs" spellcheck="false"></textarea>
+        </div>
+        <div class="srow">
+          <span class="lbl">Clone path</span>
+          <input type="text" id="s-clonepath" spellcheck="false">
+        </div>
+        <div class="srow">
+          <span class="lbl">Port</span>
+          <input type="number" id="s-port" min="1" max="65535">
+          <span class="hint">Applies on next server start.</span>
+        </div>
+        <div class="srow">
+          <span class="lbl">Defaults</span>
+          <div class="checks">
+            <label class="chk"><input type="checkbox" id="s-autoupdate"> Auto-update by default for newly tracked tools</label>
+          </div>
+        </div>
+        <div class="srow">
+          <span class="lbl">Register targets — which agents register_mcp writes to</span>
+          <div class="checks" id="s-targets"></div>
+        </div>
+        <div class="srow">
+          <span class="lbl">Catalogs — which sources Browse queries</span>
+          <div class="checks" id="s-catalogs"></div>
+        </div>
+        <div class="sbar">
+          <button type="submit" class="btn pri" id="s-save">Save settings</button>
+          <span id="s-status"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>Tags:</b>
+    <span class="tag t-mcp">mcp</span><span class="tag t-skill">skill</span><span class="tag t-app">app</span>
+    <span class="tag t-api">api</span><span class="tag t-mine">mine</span><span class="tag t-cust">your own</span>
+    <span style="color:var(--ink3)">— solid are machine-detected, dashed are yours. Click a tag in a row to remove it.</span>
+  </div>
+</div>
+
+<div class="pal" id="pal" hidden>
+  <div class="pal-box" role="dialog" aria-label="Command palette">
+    <input id="palq" placeholder="Search your shelf · type &gt; for actions" spellcheck="false" autocomplete="off">
+    <div class="pal-list" id="pallist"></div>
+    <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span class="spacer"></span><span id="palcount"></span></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="/main.ts"></script>
+</body>
+</html>

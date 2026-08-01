@@ -1,0 +1,834 @@
+<title>OSource-Manager</title>
+<style>
+:root{
+  --bg:#F7F8FA; --panel:#FFFFFF; --sunk:#EDEFF3; --line:#DCE0E7;
+  --ink:#12151B; --ink2:#5A6472; --ink3:#8A93A0;
+  --accent:#C7431F; --accent-soft:#FBEAE4;
+  --blue:#2C6FD1; --blue-soft:#E6EEFA;
+  --violet:#6A4BC4; --violet-soft:#EEE9FB;
+  --teal:#1F7A78; --teal-soft:#DFF1F0;
+  --ok:#237A50; --ok-soft:#E4F2EA;
+  --warn:#9A7314; --warn-soft:#FBF2DC;
+  --crit:#B22D2D; --crit-soft:#FBE9E9;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+  --r:6px;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0E1116; --panel:#161A21; --sunk:#1D222B; --line:#272D38;
+  --ink:#E8EBF0; --ink2:#9BA5B4; --ink3:#6B7484;
+  --accent:#E4572E; --accent-soft:#2A1912;
+  --blue:#5B9BFF; --blue-soft:#131E30;
+  --violet:#A98CFF; --violet-soft:#1D1730;
+  --teal:#48C4C0; --teal-soft:#0E2422;
+  --ok:#3FBF83; --ok-soft:#10221A;
+  --warn:#D9A429; --warn-soft:#241D0D;
+  --crit:#E5645C; --crit-soft:#261314;
+}}
+:root[data-theme="dark"]{
+  --bg:#0E1116; --panel:#161A21; --sunk:#1D222B; --line:#272D38;
+  --ink:#E8EBF0; --ink2:#9BA5B4; --ink3:#6B7484;
+  --accent:#E4572E; --accent-soft:#2A1912;
+  --blue:#5B9BFF; --blue-soft:#131E30;
+  --violet:#A98CFF; --violet-soft:#1D1730;
+  --teal:#48C4C0; --teal-soft:#0E2422;
+  --ok:#3FBF83; --ok-soft:#10221A;
+  --warn:#D9A429; --warn-soft:#241D0D;
+  --crit:#E5645C; --crit-soft:#261314;
+}
+:root[data-theme="light"]{
+  --bg:#F7F8FA; --panel:#FFFFFF; --sunk:#EDEFF3; --line:#DCE0E7;
+  --ink:#12151B; --ink2:#5A6472; --ink3:#8A93A0;
+  --accent:#C7431F; --accent-soft:#FBEAE4;
+  --blue:#2C6FD1; --blue-soft:#E6EEFA;
+  --violet:#6A4BC4; --violet-soft:#EEE9FB;
+  --teal:#1F7A78; --teal-soft:#DFF1F0;
+  --ok:#237A50; --ok-soft:#E4F2EA;
+  --warn:#9A7314; --warn-soft:#FBF2DC;
+  --crit:#B22D2D; --crit-soft:#FBE9E9;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:40px 24px 100px;display:flex;flex-direction:column;gap:48px}
+.masthead{display:flex;flex-direction:column;gap:10px;border-bottom:2px solid var(--ink);padding-bottom:18px}
+.masthead h1{margin:0;font-size:clamp(28px,4.4vw,42px);font-weight:800;letter-spacing:-.028em;text-wrap:balance}
+.masthead p{margin:0;color:var(--ink2);max-width:68ch}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600}
+section{display:flex;flex-direction:column;gap:16px}
+h2{margin:0;font-size:21px;font-weight:750;letter-spacing:-.018em}
+.lede{margin:0;color:var(--ink2);max-width:74ch}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.lbl{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+
+.funnel{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+@media(max-width:820px){.funnel{grid-template-columns:repeat(2,1fr)}}
+.stage{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);padding:11px 12px;display:flex;flex-direction:column;gap:5px;position:relative}
+.stage .n{font-family:var(--mono);font-size:10px;color:var(--ink3);font-weight:600}
+.stage b{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.stage span.d{font-size:12px;color:var(--ink2);line-height:1.4}
+.stage .cnt{position:absolute;top:10px;right:11px;font-family:var(--mono);font-size:16px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+.stage .cnt.zero{color:var(--ink3)}
+
+.app{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px -18px rgba(0,0,0,.35)}
+.bar{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--sunk);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:var(--ink2);flex-wrap:wrap}
+.dots{display:flex;gap:5px}.dots i{width:9px;height:9px;border-radius:50%;background:var(--line);display:block}
+.tabs{display:flex;gap:2px}
+.tab{padding:3px 10px;border-radius:4px}
+.tab.on{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}
+.spacer{flex:1}
+.chip{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:100px;font-weight:600;white-space:nowrap;display:inline-block}
+.c-ok{background:var(--ok-soft);color:var(--ok)}
+.c-warn{background:var(--warn-soft);color:var(--warn)}
+.c-crit{background:var(--crit-soft);color:var(--crit)}
+.c-blue{background:var(--blue-soft);color:var(--blue)}
+.c-mut{background:var(--sunk);color:var(--ink3)}
+.c-acc{background:var(--accent-soft);color:var(--accent)}
+.c-vio{background:var(--violet-soft);color:var(--violet)}
+.c-teal{background:var(--teal-soft);color:var(--teal)}
+
+.paste{display:flex;align-items:center;gap:9px;padding:11px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.paste .fld{flex:1;border:1px solid var(--line);border-radius:5px;padding:7px 10px;font-family:var(--mono);font-size:12px;color:var(--ink3);background:var(--sunk);min-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border-radius:4px;border:1px solid var(--line);background:var(--sunk);color:var(--ink2);font-weight:600;white-space:nowrap;cursor:default;display:inline-flex;align-items:center;gap:5px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.gho{background:transparent}
+.btn.ico{padding:5px 7px}
+
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:900px}
+th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-family:var(--mono);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3);background:var(--sunk);font-weight:600}
+tbody tr:hover{background:var(--sunk)}
+tbody tr:last-child td{border-bottom:0}
+td.m{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px}
+.nm{font-weight:650;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sub{display:block;font-size:11.5px;color:var(--ink3);font-weight:400;margin-top:2px;width:100%}
+.tags{display:inline-flex;gap:3px;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;letter-spacing:.02em}
+.t-mcp{background:var(--violet-soft);color:var(--violet)}
+.t-skill{background:var(--teal-soft);color:var(--teal)}
+.t-app{background:var(--blue-soft);color:var(--blue)}
+.t-api{background:var(--warn-soft);color:var(--warn)}
+.t-mine{background:var(--accent-soft);color:var(--accent)}
+.t-cust{background:var(--sunk);color:var(--ink2);border:1px dashed var(--line)}
+.linkrow{display:inline-flex;gap:3px}
+.lk{width:20px;height:20px;border-radius:4px;border:1px solid var(--line);background:var(--sunk);display:inline-grid;place-items:center;font-size:10px;color:var(--ink2);line-height:1}
+.rowacts{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+.dd{font-family:var(--mono);font-size:10.5px;padding:4px 8px;border-radius:4px;border:1px solid var(--line);background:var(--sunk);color:var(--ink2);font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.new{color:var(--accent);font-weight:700}
+.never{color:var(--crit)}
+
+.det{display:grid;grid-template-columns:1fr 310px;border-top:1px solid var(--line)}
+@media(max-width:860px){.det{grid-template-columns:1fr}}
+.det-l{padding:14px;display:flex;flex-direction:column;gap:13px;min-width:0}
+.det-r{padding:14px;border-left:1px solid var(--line);background:var(--sunk);display:flex;flex-direction:column;gap:14px;min-width:0}
+@media(max-width:860px){.det-r{border-left:0;border-top:1px solid var(--line)}}
+.det h3{margin:0;font-size:16px;font-weight:750;letter-spacing:-.015em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-family:var(--mono);font-size:11.5px;margin:0}
+.kv dt{color:var(--ink3)} .kv dd{margin:0;word-break:break-word}
+.notes{background:var(--sunk);border-left:2px solid var(--accent);padding:9px 11px;border-radius:0 5px 5px 0;font-size:13px;color:var(--ink2)}
+.dtabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line);margin:0 -14px;padding:0 14px;flex-wrap:wrap}
+.dtab{font-size:12.5px;font-weight:600;color:var(--ink3);padding:6px 10px;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.dtab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.dtab em{font-family:var(--mono);font-style:normal;font-size:9.5px;color:var(--accent);margin-left:3px}
+.auto{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);white-space:nowrap;padding:4px 0;cursor:pointer;user-select:none;background:none;border:0;font-family:inherit}
+.auto .box{width:14px;height:14px;border-radius:3px;background:transparent;border:1.5px solid var(--ink3);
+  display:grid;place-items:center;font-size:9px;color:#fff;line-height:1}
+.auto[aria-pressed="true"] .box{background:var(--accent);border-color:var(--accent)}
+.auto[aria-pressed="true"]{color:var(--ink)}
+.auto .box::after{content:"✓";opacity:0}
+.auto[aria-pressed="true"] .box::after{opacity:1}
+/* interactive affordances */
+button,.tab,.dtab,.lk,.btn,.dd,.tgt,tbody tr{cursor:pointer}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;text-align:left}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+.btn:hover,.dd:hover,.lk:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri:hover{filter:brightness(1.08);color:#fff}
+tbody tr.sel{background:var(--accent-soft)}
+tbody tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+.hidden{display:none}
+.menu{position:relative;display:inline-block}
+.menu-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:20;background:var(--panel);border:1px solid var(--line);
+  border-radius:6px;box-shadow:0 8px 28px -8px rgba(0,0,0,.45);min-width:172px;padding:4px;display:flex;flex-direction:column;gap:1px}
+.menu-pop button{font-size:12.5px;padding:6px 9px;border-radius:4px;color:var(--ink2);white-space:nowrap;display:flex;gap:8px;align-items:center}
+.menu-pop button:hover{background:var(--sunk);color:var(--ink)}
+.menu-pop hr{border:0;border-top:1px solid var(--line);margin:3px 0}
+.menu-pop .danger{color:var(--crit)}
+.menu-pop button{justify-content:space-between}
+.menu-pop .mhint{font-family:var(--mono);font-size:9.5px;color:var(--ink3);margin-left:14px;white-space:nowrap}
+.menu-pop{min-width:250px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--ink);
+  color:var(--bg);font-family:var(--mono);font-size:12px;padding:9px 15px;border-radius:6px;z-index:50;
+  opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;box-shadow:0 8px 28px -8px rgba(0,0,0,.5)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+.term{background:#0B0E13;border:1px solid var(--line);border-radius:5px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#B9C2CF;overflow-x:auto;line-height:1.65}
+.term .c{color:#6B7484} .term .g{color:#3FBF83} .term .o{color:#E4572E} .term .y{color:#D9A429}
+.clog{border:1px solid var(--line);border-radius:5px;padding:10px 12px;background:var(--sunk);font-size:12.5px;color:var(--ink2)}
+.crel{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.crel b{font-family:var(--mono);font-size:12.5px;color:var(--ink);font-weight:700}
+.clog ul{margin:5px 0 0;padding-left:16px;display:flex;flex-direction:column;gap:3px}
+.cbox{display:flex;gap:6px}
+.cbox .fld{flex:1;border:1px solid var(--line);border-radius:5px;padding:7px 10px;font-size:12.5px;
+  background:var(--panel);color:var(--ink);min-width:0}
+.stream{display:flex;flex-direction:column;gap:1px;margin-top:9px}
+.ci{padding:8px 11px;font-size:12.5px;color:var(--ink2);border-left:2px solid var(--line);background:var(--sunk);line-height:1.5}
+.ci.u{border-left-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+.ci .ch{display:flex;gap:8px;align-items:baseline;margin-bottom:2px}
+.ci .ch b{font-size:11.5px;font-weight:700}
+.ci.e .ch b{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em}
+.ci .ct{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-left:auto}
+.acts{display:flex;flex-wrap:wrap;gap:5px}
+
+.targets{display:flex;flex-direction:column;gap:4px}
+.tgt{display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--panel);border:1px solid var(--line);border-radius:5px;font-size:12.5px}
+.tgt .box{width:14px;height:14px;border-radius:3px;border:1.5px solid var(--ink3);flex:none;display:grid;place-items:center;font-size:10px;color:#fff;line-height:1}
+.tgt.on .box{background:var(--accent);border-color:var(--accent)}
+.tgt .path{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:118px}
+.tgt.off{opacity:.5}
+.viadock{display:flex;gap:7px;align-items:flex-start;padding:8px 10px;background:var(--violet-soft);border-radius:5px;font-size:12px;color:var(--ink2);line-height:1.45}
+
+.so-what{padding:12px 14px;border-left:2px solid var(--accent);background:var(--accent-soft);border-radius:0 var(--r) var(--r) 0;font-size:14px}
+.warn-box{padding:11px 14px;border-left:2px solid var(--warn);background:var(--warn-soft);border-radius:0 var(--r) var(--r) 0;font-size:13.5px;color:var(--ink)}
+ul.tight{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;color:var(--ink2);max-width:76ch}
+code{font-family:var(--mono);font-size:12.5px;background:var(--sunk);padding:1px 5px;border-radius:3px}
+.tbl-plain{border:1px solid var(--line);border-radius:var(--r);overflow-x:auto}
+.tbl-plain table{min-width:600px;background:var(--panel)}
+
+/* --- scale: filter bar, favorites, palette --- */
+.fbar{display:flex;align-items:center;gap:5px;padding:9px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--panel)}
+.pil{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:4px 9px;border-radius:100px;
+  border:1px solid var(--line);background:var(--sunk);color:var(--ink2);display:inline-flex;gap:5px;align-items:center;white-space:nowrap}
+.pil em{font-style:normal;font-size:9.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.pil.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.pil.on em{color:rgba(255,255,255,.75)}
+.pil.dim{border-style:dashed}
+.vsep{width:1px;height:16px;background:var(--line);margin:0 3px}
+kbd{font-family:var(--mono);font-size:9.5px;background:var(--sunk);border:1px solid var(--line);
+  border-bottom-width:2px;border-radius:3px;padding:1px 4px;color:var(--ink2)}
+.fav{background:none;border:0;padding:0 2px;font-size:13px;line-height:1;color:var(--ink3);flex:none}
+.fav.on{color:var(--warn)}
+.pal[hidden]{display:none}
+.pal{position:fixed;inset:0;background:rgba(6,8,12,.55);z-index:100;display:flex;justify-content:center;padding-top:12vh}
+.pal-box{width:min(620px,92vw);height:max-content;max-height:64vh;background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;box-shadow:0 24px 70px -20px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden}
+.pal-box input{border:0;border-bottom:1px solid var(--line);padding:14px 16px;font-family:var(--mono);font-size:14px;
+  background:transparent;color:var(--ink);outline:0;width:100%}
+.pal-list{overflow-y:auto;padding:5px;display:flex;flex-direction:column;gap:1px}
+.pal-row{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:5px;font-size:13px;cursor:pointer;text-align:left;width:100%;border:0;background:none;color:var(--ink2)}
+.pal-row .pn{font-weight:650;color:var(--ink);white-space:nowrap}
+.pal-row .pd{font-size:11.5px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.pal-row .pk{font-family:var(--mono);font-size:9.5px;color:var(--ink3);margin-left:auto;white-space:nowrap}
+.pal-row.cur{background:var(--accent-soft)}
+.pal-row.cur .pn{color:var(--accent)}
+.pal-foot{display:flex;gap:12px;align-items:center;padding:7px 12px;border-top:1px solid var(--line);
+  background:var(--sunk);font-size:11px;color:var(--ink3)}
+.pal-foot span{display:inline-flex;gap:3px;align-items:center}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2);align-items:center}
+.legend b{font-weight:600;color:var(--ink)}
+.srcbar{display:flex;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.src{font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:100px;border:1px solid var(--line);
+  background:var(--sunk);color:var(--ink2);display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.src em{font-family:var(--mono);font-style:normal;font-size:10px;color:var(--ink3)}
+.src.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.src.on em{color:rgba(255,255,255,.75)}
+.srcbar .fld{max-width:180px;flex:0 1 180px;min-width:110px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:12px}
+@media(max-width:820px){.cards{grid-template-columns:1fr}}
+.card{border:1px solid var(--line);border-radius:6px;padding:11px 12px;display:flex;flex-direction:column;gap:6px;background:var(--panel)}
+.card:hover{border-color:var(--accent)}
+.card .ch{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.card b{font-size:13.5px;font-weight:700;letter-spacing:-.01em}
+.card p{margin:0;font-size:12px;color:var(--ink2);line-height:1.45;flex:1}
+.card .cf{display:flex;align-items:center;gap:5px;margin-top:2px}
+.card .by{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-left:auto}
+.card.have{opacity:.62}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <span class="kicker">Mockup v2 · your notes applied</span>
+  <h1>OSource-Manager</h1>
+  <p>See it, try it, keep it or kill it. A <strong>front door</strong>: repo URL to running-in-a-sandbox in one click,
+  with the verdict remembered. Two interfaces over one core — this page, and an MCP server so an agent can drive it
+  mid-conversation. Open source, single-user, no build ceremony.</p>
+</header>
+
+<section>
+  <h2>Lifecycle</h2>
+  <p class="lede">Repos, global CLIs, MCP servers and your own skills are all the same object: something acquired that
+  may or may not earn its place. Deleting from disk moves a row back to <em>Tracked</em> — it never leaves.</p>
+  <div class="funnel">
+    <div class="stage"><span class="n">01</span><span class="cnt">14</span><b>Tracked</b><span class="d">URL only. Not on disk. Still watched for releases.</span></div>
+    <div class="stage"><span class="n">02</span><span class="cnt">3</span><b>Trying</b><span class="d">Running in a local container. Teardown is one click.</span></div>
+    <div class="stage"><span class="n">03</span><span class="cnt">21</span><b>Installed</b><span class="d">On disk, or global CLI, or an active skill.</span></div>
+    <div class="stage"><span class="n">04</span><span class="cnt">6</span><b>Serving</b><span class="d">Registered as MCP in ≥1 agent. Counted from configs.</span></div>
+    <div class="stage"><span class="n">05</span><span class="cnt zero">0</span><b>Retired</b><span class="d">Killed with the reason kept. Starts empty — it fills as you judge.</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>The surface</h2>
+  <div class="app">
+    <div class="bar">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="tabs" id="filters">
+        <button class="tab on" data-f="all">All</button><button class="tab" data-f="mcp">MCP</button>
+        <button class="tab" data-f="skill">Skills</button><button class="tab" data-f="upd">Updates 4</button>
+        <button class="tab" data-f="retired">Retired</button>
+      </span>
+      <span class="spacer"></span>
+      <span class="mono" id="stamp">refreshed 2026-07-31 14:22:07</span>
+      <button class="btn gho ico" id="refresh" title="Refresh">↻</button>
+    </div>
+
+    <div class="paste">
+      <span class="lbl">Add</span>
+      <input class="fld" id="addurl" value="https://github.com/steel-dev/steel-browser" spellcheck="false" aria-label="Repo URL">
+      <button class="btn" data-add="Tracked">Track only</button>
+      <button class="btn" data-add="Trying">Try in Docker</button>
+      <button class="btn pri" data-add="Installed">Clone + install</button>
+    </div>
+
+    <div class="fbar">
+      <button class="pil on" data-fq="">All <em id="cAll">9</em></button>
+      <button class="pil" data-fq="★">★ Favorites <em id="favCount">3</em></button>
+      <span class="vsep"></span>
+      <button class="pil" data-fq="mcp">mcp <em>4</em></button>
+      <button class="pil" data-fq="skill">skill <em>2</em></button>
+      <button class="pil" data-fq="app">app <em>4</em></button>
+      <button class="pil" data-fq="mine">mine <em>2</em></button>
+      <button class="pil" data-fq="daily">daily <em>1</em></button>
+      <span class="vsep"></span>
+      <button class="pil dim" data-fq="never">never used <em>4</em></button>
+      <button class="pil dim" data-fq="upd">has update <em>3</em></button>
+      <span class="spacer"></span>
+      <button class="btn gho" id="palbtn"><kbd>Ctrl</kbd><kbd>K</kbd> search</button>
+    </div>
+    <div class="tw">
+    <table>
+      <thead><tr>
+        <th>Tool</th><th>Links</th><th>State</th><th>Version</th><th>Upstream</th><th>Last used</th><th style="text-align:right">Do</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+      
+    </table>
+    </div>
+
+    <div class="det">
+      <div class="det-l">
+        <h3>steel-browser <span class="chip c-blue">trying · 2h</span> <span class="chip c-warn">v0.9.0 available</span></h3>
+        <div class="dtabs" id="dtabs">
+          <button class="dtab on" data-p="details">Details</button><button class="dtab" data-p="readme">Readme</button>
+          <button class="dtab" data-p="changelog">Changelog <em>4d</em></button>
+          <button class="dtab" data-p="run">Run</button><button class="dtab" data-p="log">Log</button><button class="dtab" data-p="comments">Comments <em>4</em></button>
+          <span class="spacer"></span>
+          <button class="auto" id="autoupd" aria-pressed="false"><span class="box"></span>Auto update</button>
+        </div>
+        <dl class="kv pane-details">
+          <dt>upstream</dt><dd>github.com/steel-dev/steel-browser</dd>
+          <dt>on disk</dt><dd>D:\dev\tools\steel-browser</dd>
+          <dt>added</dt><dd>2026-07-31 12:04:11</dd>
+          <dt>checked</dt><dd>2026-07-31 14:22:07</dd>
+        </dl>
+
+        <div class="pane-readme hidden">
+          <span class="lbl">README.md — from the repo</span>
+          <div class="clog" style="margin-top:6px">
+            <b style="color:var(--ink);font-size:14px">Steel Browser</b>
+            <p style="margin:6px 0 0">Open-source browser API for AI agents. Runs headful Chromium in a container,
+            exposes REST + WebSocket, and ships a live session viewer.</p>
+            <ul style="margin-top:8px"><li>Session management with reconnect</li><li>Proxy + stealth built in</li>
+            <li>CDP passthrough for anything the API doesn't cover</li></ul>
+          </div>
+        </div>
+
+        <div class="pane-run">
+          <span class="lbl">Run command — read from the repo, not typed by you</span>
+          <div class="term" style="margin-top:6px">
+<span class="c"># generated from compose.yaml + README, port picked free</span>
+docker run -d <span class="g">--name</span> oss-try-steel-browser \
+  <span class="g">--label</span> oss.trial=steel-browser \
+  <span class="y">--shm-size=1g</span> <span class="c"># default 64m crashes Chrome</span> \
+  <span class="g">-p</span> 3001:3000 <span class="c"># 3000 taken by media-engine</span> \
+  <span class="g">-v</span> steel_data:/app/data <span class="c"># named vol, not bind</span> \
+  ghcr.io/steel-dev/steel-browser:v0.8.1</div>
+          <div class="acts" style="margin-top:7px">
+            <button class="btn" data-toast="shm-size=1g · Chrome's default 64m causes tab crashes that look like network errors">Explain each flag</button>
+            <button class="btn" data-toast="Edit mode — command becomes editable, saved per tool">Edit</button>
+            <button class="btn" data-toast="Port 3000 held by media-engine. Next free: 3001">Why this port?</button>
+          </div>
+        </div>
+
+        <div class="pane-log">
+          <span class="lbl">Live log</span>
+          <div class="term" style="margin-top:6px">
+<span class="c">14:22:03</span> server listening on :3000
+<span class="c">14:22:04</span> <span class="g">✓</span> chromium launched, 1 session slot
+<span class="c">14:22:41</span> <span class="y">warn</span> /v1/sessions called without timeout</div>
+        </div>
+
+        <div class="pane-changelog">
+          <span class="lbl">Changelog — since your version</span>
+          <div class="clog" style="margin-top:6px">
+            <div class="crel">
+              <b>v0.9.0</b><span class="chip c-warn">4 days ago</span><span class="chip c-crit">breaking</span>
+            </div>
+            <ul>
+              <li>Session recording exposed over REST</li>
+              <li><span class="new">Breaking:</span> <code>/v1/sessions</code> now requires an explicit <code>timeout</code></li>
+              <li>Default shm bumped to 1g</li>
+            </ul>
+            <div class="crel" style="margin-top:8px"><b>v0.8.2</b><span class="chip c-mut">3 weeks ago</span></div>
+            <ul><li>Fix: proxy auth dropped on redirect</li></ul>
+          </div>
+        </div>
+
+        <div class="notes"><b>Your note:</b> trying against the pod setup — if the live viewer beats noVNC it may replace
+        that layer in Legion Warden. Decide by Friday.</div>
+
+        <div class="pane-comments hidden">
+          <span class="lbl">Comments — why, over time</span>
+          <div class="cbox" style="margin-top:6px">
+            <input class="fld" placeholder="Why does this matter? (enter to post)" aria-label="Add comment">
+            <button class="btn pri">Post</button>
+          </div>
+          <div class="stream">
+            <div class="ci u"><div class="ch"><b>you</b><span class="ct">today 14:04</span></div>
+              trying against the pod setup — if the live viewer beats noVNC it may replace that layer in Legion Warden. Decide by Friday.</div>
+            <div class="ci e"><div class="ch"><b>trial started</b><span class="ct">today 12:04</span></div>
+              container oss-try-steel-browser · shm 1g · port 3001</div>
+            <div class="ci e"><div class="ch"><b>tracked</b><span class="ct">today 12:03</span></div>
+              added from Docker MCP catalog · 3.1k ★</div>
+            <div class="ci u"><div class="ch"><b>you</b><span class="ct">today 12:03</span></div>
+              found via the pods research — want an agent-native browser that isn't noVNC.</div>
+          </div>
+        </div>
+
+        <div class="acts">
+          <button class="btn pri" data-toast="Promoted → state: Installed. Container kept, trial label removed">Promote to host</button>
+          <button class="btn" data-toast="Pulling v0.9.0 — breaking change flagged, review before restart">Update → v0.9.0</button>
+          <button class="btn" data-toast="Opening localhost:3001 ↗">Open viewer ↗</button>
+          <button class="btn" data-toast="Opening Portainer → container oss-try-steel-browser ↗">Open in Portainer ↗</button>
+          <button class="btn" data-toast="Removed container + image + 88MB volumes. Row → Tracked">Tear down</button>
+          <button class="btn" data-toast="Retire needs a reason — that's the whole point">Retire…</button>
+        </div>
+      </div>
+
+      <aside class="det-r">
+        <div>
+          <span class="lbl">Serve as MCP — this repo</span>
+          <div class="viadock" style="margin:6px 0 8px">
+            <span>🐳</span><span>In Docker's MCP catalog. Registering hands it to <b>MCP Toolkit</b> — containerized,
+            secrets handled, no config files hand-written.</span>
+          </div>
+          <div class="targets" id="targets">
+            <button class="tgt on" aria-pressed="true"><span class="box">✓</span>Claude Code<span class="path">via Toolkit</span></button>
+            <button class="tgt on" aria-pressed="true"><span class="box">✓</span>Codex<span class="path">~/.codex/config.toml</span></button>
+            <button class="tgt" aria-pressed="false"><span class="box"></span>Kimi CLI<span class="path">~/.kimi/</span></button>
+            <button class="tgt" aria-pressed="false"><span class="box"></span>Zed<span class="path">settings.json</span></button>
+            <button class="tgt" aria-pressed="false"><span class="box"></span>VS Code<span class="path">mcp.json</span></button>
+            <div class="tgt off"><span class="box"></span>Claude Desktop<span class="path">not detected</span></div>
+          </div>
+          <div class="acts" style="margin-top:8px"><button class="btn pri" id="reg">Register in 2</button><button class="btn" data-toast="Dry run — 2 files would change, 0 conflicts">Dry run</button></div>
+          <p style="margin:7px 0 0;font-size:11.5px;color:var(--ink3)">Per-repo, always. There is no “apply to all”.</p>
+        </div>
+        <div>
+          <span class="lbl">Disk</span>
+          <dl class="kv" style="margin-top:5px">
+            <dt>repo</dt><dd>412 MB</dd>
+            <dt>image</dt><dd>1.2 GB</dd>
+            <dt>volumes</dt><dd>88 MB</dd>
+          </dl>
+          <p style="margin:6px 0 0;font-size:11.5px;color:var(--ink3)">Teardown removes all three.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <div class="legend">
+    <b>Tags:</b>
+    <span class="tag t-mcp">mcp</span><span class="tag t-skill">skill</span><span class="tag t-app">app</span>
+    <span class="tag t-api">api</span><span class="tag t-mine">mine</span><span class="tag t-cust">your own</span>
+    <span style="color:var(--ink3)">— first four detected from the repo, last two are yours.</span>
+  </div>
+</section>
+
+
+
+
+<section>
+  <h2>Two front doors, one core</h2>
+  <p class="lede">The MCP server isn't a bonus feature — it's the interface you'll use most. You're already in a Claude
+  session when you find a repo; the URL should never have to leave the chat.</p>
+
+  <div class="app">
+    <div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="mono">osource-manager · mcp tools</span>
+      <span class="spacer"></span><span class="chip c-vio">registered in 3 agents</span></div>
+    <div class="tw">
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th><th>Writes?</th></tr></thead>
+      <tbody>
+        <tr><td class="m">search</td><td>Your shelf <em>and</em> the public catalogs, one call. Catalogs are queried live, never stored.</td><td><span class="chip c-mut">read</span></td></tr>
+        <tr><td class="m">track</td><td>Add a URL at <em>Tracked</em>. Nothing installs. Defaults come from settings.</td><td><span class="chip c-ok">registry</span></td></tr>
+        <tr><td class="m">try_it</td><td>Read the repo, generate the run command, start the container.</td><td><span class="chip c-warn">docker</span></td></tr>
+        <tr><td class="m">tear_down</td><td>Remove container, image, volumes. Row → Tracked.</td><td><span class="chip c-warn">docker</span></td></tr>
+        <tr><td class="m">register_mcp</td><td>Write a server into chosen agents' configs. Backs up first.</td><td><span class="chip c-crit">configs</span></td></tr>
+        <tr><td class="m">retire</td><td>Kill it with a reason. The reason is the point.</td><td><span class="chip c-ok">registry</span></td></tr>
+        
+      </tbody>
+    </table>
+    </div>
+    <div class="det-l" style="border-top:1px solid var(--line)">
+      <span class="lbl">In a session</span>
+      <div class="term" style="margin-top:6px">
+<span class="c">you  ›</span> found this, worth trying? github.com/steel-dev/steel-browser
+<span class="c">     ›</span> <span class="g">search</span> → in Docker MCP catalog, 3.1k ★ · not on your shelf
+<span class="c">     ›</span> <span class="g">try_it</span> → localhost:3001 · <span class="y">shm 1g, port auto, named volume</span>
+<span class="c">you  ›</span> good. keep it and wire it into codex
+<span class="c">     ›</span> <span class="g">register_mcp</span>(codex) → <span class="o">1 config written, backup kept</span></div>
+    </div>
+  </div>
+  <div class="so-what"><strong>The constraint that keeps it simple:</strong> MCP tools and HTTP endpoints call the same
+  functions. One core module, two thin adapters. Let them drift and you own two products.</div>
+</section>
+
+<section>
+  <h2>Stack</h2>
+  <ul class="tight">
+    <li><strong>TypeScript, one package, no UI framework.</strong> <code>core/</code> (SQLite + the six operations
+    above), <code>mcp/</code> and <code>web/</code> as thin adapters. Vite for the build. Three folders.</li>
+    <li><strong>SQLite, four owned fields</strong> — <code>why_i_want_it</code>, <code>state</code>,
+    <code>retire_reason</code>, <code>tags</code>, plus <code>favorite</code>. Everything else derived from disk,
+    package managers, agent configs, atom feeds.</li>
+    <li><strong>Single-user, localhost, no auth.</strong> Open source from commit one, MIT.</li>
+    <li><strong>Global settings, one screen</strong> — clone path (<code>D:\dev\tools</code>), auto-update default
+    (off), which agents <code>register_mcp</code> targets, which catalogs Browse queries. Per-row overrides where it matters.</li>
+    <li><strong>It registers itself.</strong> First run: OSource-Manager writes its own MCP entry into your agents —
+    using the same <code>register_mcp</code> everything else uses. If that's broken, you find out immediately.</li>
+    <li><strong>Local only.</strong> No cloud trial, no hosted mode, no daemon. Containers run on your machine or
+    they don't run.</li>
+    <li><strong>Scale:</strong> table for the hot set, <kbd>Ctrl</kbd><kbd>K</kbd> past a few hundred rows.
+    Virtualize only when a real row count makes it lag.</li>
+  </ul>
+  <div class="so-what"><strong>Skipped:</strong> auth, multi-user, hosted mode, notifications, daemon, dependency
+  tracking inside repos, container management past trial + teardown. Open source means someone else can add what they
+  need — you don't pre-build it for them.</div>
+</section>
+
+<section>
+  <h2>Browse — other people's shelves</h2>
+  <p class="lede">Manage is your stuff. Browse is everyone else's — queried live, never mirrored. Track is the bridge:
+  it costs one row and no disk, so tracking a whole category is cheap. Cloning is the deliberate second step.</p>
+
+  <div class="app">
+    <div class="bar">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="tabs"><button class="tab">Manage</button><button class="tab on">Browse</button></span>
+      <span class="spacer"></span>
+      <span class="mono">4 sources</span>
+    </div>
+    <div class="srcbar" id="srcbar">
+      <button class="src on">🐳 Docker MCP <em>214</em></button>
+      <button class="src">✳ Anthropic skills <em>38</em></button>
+      <button class="src">◆ Community skills <em>8 mkts</em></button>
+      <button class="src">⎇ GitHub <em>search</em></button>
+      <span class="spacer"></span>
+      <input class="fld" id="q" placeholder="filter…" spellcheck="false" aria-label="Filter catalog">
+    </div>
+    <div class="cards" id="cards"></div>
+  </div>
+  <div class="so-what"><strong>Nothing here is stored.</strong> These catalogs are public and already searchable —
+  we query them live. A row only enters your database when you track it. Track all the browser MCP servers, clone the
+  one you actually want.</div>
+</section>
+
+<section>
+  <h2>What this does <em>not</em> build</h2>
+  <p class="lede">Containers are the right primitive — and container management is a solved, crowded space. Building
+  another one would be the Higgsfield mistake a second time.</p>
+  <div class="tbl-plain">
+  <table>
+    <thead><tr><th>Job</th><th>Owner</th><th>Why not us</th></tr></thead>
+    <tbody>
+      <tr><td>Container lifecycle, exec, volumes, stats, stacks</td><td>Portainer · Lazydocker · Docker Desktop</td><td>38k stars of prior art. We link out.</td></tr>
+      <tr><td>MCP servers in containers + secrets</td><td>Docker MCP Toolkit</td><td>Free, 200+ catalog, official. We call it.</td></tr>
+      <tr><td>Public MCP directory</td><td>Docker MCP Catalog</td><td>Consume, don't rebuild.</td></tr>
+      <tr><td>Public skills marketplace</td><td>8 of them as of Q2 2026</td><td>Crowded. Your <em>own</em> skills are the gap, and that's a row type here.</td></tr>
+      <tr><td>Browser pods for agents</td><td>Legion Warden</td><td>Already yours.</td></tr>
+      <tr><td>Updating installed things</td><td>topgrade</td><td>We trigger it; we don't reimplement it.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="so-what"><strong>What's left is the seam:</strong> URL → correct <code>docker run</code> → verdict remembered.
+  Nobody owns that, and it's the step you actually repeat.</div>
+</section>
+
+<section>
+  <h2>Borrowed from the VSCode extension pane</h2>
+  <p class="lede">You already live in this pattern and it works. No reason to invent a different one — three of its
+  ideas map straight onto tools.</p>
+  <div class="tbl-plain">
+  <table>
+    <thead><tr><th>VSCode does</th><th>We do</th><th>Why it's better than my first pass</th></tr></thead>
+    <tbody>
+      <tr><td class="m">Details / Features / Changelog</td><td class="m">Details / Readme / Changelog / Run / Log</td>
+        <td>Changelog gets its own tab instead of being crammed inline — scales to a long README.</td></tr>
+      <tr><td class="m">☑ Auto Update</td><td class="m">☑ Auto update, per row</td>
+        <td>Answers “update button should exist here” better than a button. Some tools track latest; some you pin.</td></tr>
+      <tr><td class="m">Last Updated · 7 seconds ago</td><td class="m">checked · to the second</td>
+        <td>You asked for exactly this. Relative in the row, absolute in the detail.</td></tr>
+      <tr><td class="m">Install count · rating · publisher</td><td class="m">⬜ skipped</td>
+        <td>Social proof matters in a marketplace of strangers. You already decided you want the repo.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="so-what">Also visible in your screenshot: VSCode now has its own <b>MCP Servers</b> sidebar section — a
+  fifth place MCP config lives, and one more argument that “register everywhere” has to write files rather than rely
+  on any single protocol.</div>
+</section>
+
+<section>
+  <h2>Why skills belong in this table</h2>
+  <p class="lede">You have ~40 skills across three locations and a <code>/skills</code> command that exists because you
+  can't remember what you have. Same disease as the 60-tool pile, one layer up.</p>
+  <div class="warn-box">
+    Your audit flagged a real tension: you call skills the foundation of your system; Anthropic's guidance says delete
+    skills and CLAUDE.md every six months. A <code>last_fired</code> column settles it with data instead of doctrine —
+    <code>reverse-engineer</code> above has never fired, and that's a fact, not an opinion.
+  </div>
+</section>
+
+<section>
+  <h2>Backend</h2>
+  <ul class="tight">
+    <li><strong>Discovery is derived, never typed.</strong> Walk the tools folder for <code>.git</code>; ask each package
+    manager (<code>npm ls -g</code>, <code>pipx list</code>, <code>cargo install --list</code>, <code>scoop list</code>,
+    <code>winget list</code>); read the three skills directories; <code>docker ps -a</code> for trials.</li>
+    <li><strong>You own four fields.</strong> <code>why_i_want_it</code>, <code>state</code>, <code>retire_reason</code>,
+    <code>custom_tags</code>. Everything else is read from disk, configs, or GitHub. This is what stops it becoming tool #61.</li>
+    <li><strong>“Serving ×N” is counted, not recorded</strong> — grep each agent's config for the server name. Register or
+    unregister anywhere and the count self-corrects.</li>
+    <li><strong>The AI part is generating the run command</strong> — read compose/Dockerfile/README, pick a free port, set
+    <code>shm_size</code>, prefer named volumes, label for teardown. That's the piece Portainer can't do and you'd get wrong by hand.</li>
+    <li><strong>Upstream = releases atom feed</strong>, one fetch per repo on open and on refresh. Timestamp to the second. No daemon.</li>
+    <li><strong>MCP registration:</strong> in Docker's catalog → hand to MCP Toolkit. Not in it → write the agent's config
+    directly, backing up the file first. Dry run shows the diff.</li>
+    <li><strong>Stack:</strong> one Python file, SQLite, stdlib <code>http.server</code>. No framework, no auth, localhost.</li>
+  </ul>
+  <div class="so-what"><strong>Skipped:</strong> notifications, daemon, auth, multi-machine sync, dependency tracking inside
+  repos, container management beyond trial + teardown. Add release notifications when you've actually missed one that mattered.</div>
+</section>
+
+</div>
+
+<div class="pal" id="pal" hidden>
+  <div class="pal-box" role="dialog" aria-label="Command palette">
+    <input id="palq" placeholder="Search 1,284 tracked · type &gt; for actions" spellcheck="false" autocomplete="off">
+    <div class="pal-list" id="pallist"></div>
+    <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span class="spacer"></span><span id="palcount"></span></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const TOOLS=[
+ {fav:1,n:"steel-browser",d:"agent-native browser, Docker, live viewer",tags:[["app","t-app"],["api","t-api"],["pods","t-cust"]],
+  links:4,state:["trying","c-blue"],v:"v0.8.1",up:"v0.9.0 ↑",upNew:1,used:"2h ago",f:["upd"],acts:[["Promote to host","keep it, drop the trial label"],["Update → v0.9.0","breaking change — review first"],["Diff v0.8.1 → v0.9.0","what actually changed"],["-"],["Open viewer ↗","localhost:3001"],["Open in Portainer ↗","logs, exec, stats"],["Shell into container",""],["Copy run command",""],["-"],["Tear down","container + image + volumes"],["Retire…","needs a reason"]]},
+ {n:"resolve-mcp",d:"215 tools over DaVinci scripting API",tags:[["mcp","t-mcp"]],
+  links:2,state:["tracked","c-mut"],v:"—",up:"v2.1.0",used:"never",usedNever:1,f:["mcp"],acts:[["Try in Docker","one command, one-click teardown"],["Clone + install","straight to D:\dev\tools"],["-"],["Open repo ↗",""],["Read the README",""],["Why did I track this?","your note"],["-"],["Retire…","never tried — say why"]]},
+ {fav:1,n:"trello-mcp",d:"board + card tools",tags:[["mcp","t-mcp"],["daily","t-cust"]],
+  links:4,state:["serving ×2","c-acc"],v:"v1.4.2",up:"v1.4.2",used:"today",f:["mcp"],acts:[["Manage clients","2 registered"],["Register elsewhere…",""],["Restart in all clients",""],["-"],["Check for updates",""],["Open repo ↗",""],["-"],["Unregister all","leaves it installed"],["Retire…",""]]},
+ {n:"officemcp",d:"Word/Excel/PowerPoint automation",tags:[["mcp","t-mcp"]],
+  links:4,state:["serving ×1","c-acc"],v:"v0.6.0",up:"v0.7.0 ↑",upNew:1,used:"11d ago",f:["mcp","upd"],inline:"update",acts:[["Update → v0.7.0","restarts 1 client"],["Changelog since v0.6.0",""],["-"],["Manage clients","1 registered"],["Open repo ↗",""],["-"],["Retire…",""]]},
+ {fav:1,n:"intrack-reels",d:"real-footage law for reels · dotfiles/skills",tags:[["skill","t-skill"],["mine","t-mine"]],
+  links:3,state:["installed","c-ok"],v:"local",up:"—",used:"6d ago",f:["skill"],acts:[["Open SKILL.md",""],["Edit frontmatter","name + description"],["-"],["Commit to dotfiles","jgharbieh/claude-code"],["Push dotfiles",""],["Copy path",""],["-"],["Retire…","removes symlink, keeps file"]]},
+ {n:"reverse-engineer",d:"recover the generator behind an artifact",tags:[["skill","t-skill"],["mine","t-mine"]],
+  links:3,state:["never fired","c-warn"],v:"local",up:"—",used:"never",usedNever:1,f:["skill"],acts:[["Open SKILL.md",""],["Why has this never fired?","check trigger wording"],["Test the trigger",""],["-"],["Edit frontmatter",""],["Copy path",""],["-"],["Retire…","29 skills, this one is dead weight"]]},
+ {n:"topgrade",d:"updates everything installed · scoop",tags:[["app","t-app"]],
+  links:2,state:["installed","c-ok"],v:"v16.0.2",up:"v16.0.2",used:"3d ago",f:[],acts:[["Run --dry-run","always first — breaks virtualenvs"],["Run",""],["-"],["Edit topgrade.toml",""],["Open repo ↗",""],["-"],["Retire…",""]]},
+ {n:"playwright-mcp",d:"browser driving for agents · npm -g",tags:[["mcp","t-mcp"],["app","t-app"]],
+  links:2,state:["serving ×3","c-acc"],v:"v1.9.4",up:"v1.10.0 ↑",upNew:1,used:"today",f:["mcp","upd"],inline:"update",acts:[["Update → v1.10.0","restarts 3 clients"],["Changelog since v1.9.4",""],["-"],["Manage clients","3 registered"],["Open repo ↗",""],["-"],["Retire…",""]]},
+ {n:"postiz",d:"social scheduling — replaced by manual posting",tags:[["app","t-app"]],
+  links:2,state:["retired","c-crit"],v:"—",up:"v2.8.0",used:"never",usedNever:1,f:["retired"],why:"Two-lane doctrine — manual posting won.",acts:[["Why retired","Two-lane doctrine — manual won"],["-"],["Re-try in Docker","reopens the question"],["Open repo ↗",""],["Delete row","the only real delete"]]},
+];
+const CATALOG={
+ docker:[{n:"github",d:"Issues, PRs, code search across your repos.",by:"docker/mcp",have:0},
+   {n:"postgres",d:"Query and inspect Postgres schemas read-only.",by:"docker/mcp",have:0},
+   {n:"playwright",d:"Drive a browser from any agent.",by:"docker/mcp",have:1},
+   {n:"filesystem",d:"Scoped file read/write for agents.",by:"docker/mcp",have:0},
+   {n:"slack",d:"Read channels, post messages, search history.",by:"docker/mcp",have:0},
+   {n:"sentry",d:"Pull issues and stack traces into context.",by:"docker/mcp",have:0}],
+ anthropic:[{n:"pdf-filling",d:"Fill and flatten PDF forms programmatically.",by:"anthropics/skills",have:0},
+   {n:"xlsx",d:"Read and write Excel with formulas intact.",by:"anthropics/skills",have:0},
+   {n:"artifacts-builder",d:"Build richer HTML artifacts.",by:"anthropics/skills",have:1},
+   {n:"docx",d:"Author Word documents with real styles.",by:"anthropics/skills",have:0},
+   {n:"mcp-builder",d:"Scaffold a new MCP server end to end.",by:"anthropics/skills",have:0},
+   {n:"webapp-testing",d:"Drive and assert against a running web app.",by:"anthropics/skills",have:0}],
+ community:[{n:"remotion",d:"React components → MP4. #4 most-installed skill.",by:"skillsmp",have:0},
+   {n:"obsidian-vault",d:"Read and write an Obsidian vault safely.",by:"agensi",have:0},
+   {n:"changelog-writer",d:"Turn a diff into release notes.",by:"claudeskills.info",have:0},
+   {n:"sql-review",d:"Catch N+1 and missing indexes in migrations.",by:"awesome-cc-skills",have:0}],
+ github:[{n:"steel-dev/steel-browser",d:"Open-source browser API for agents.",by:"3.1k ★",have:1},
+   {n:"jdx/mise",d:"Polyglot runtime + task manager.",by:"12k ★",have:0},
+   {n:"portainer/portainer",d:"Container management UI.",by:"38k ★",have:0}],
+};
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+let toastT;
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2600);}
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+/* ---- rows ---- */
+const ICONS=["↗","▤","⧉","◧"];
+function rowHTML(t,i){
+  const tags=t.tags.map(([l,c])=>`<span class="tag ${c}">${l}</span>`).join("");
+  const links=ICONS.slice(0,t.links).map(g=>`<button class="lk" data-toast="${esc(g==="↗"?"Opening "+t.n+" on GitHub":g==="▤"?"README for "+t.n:g==="⧉"?"Path copied":"Opening "+t.n+" in VS Code")}">${g}</button>`).join("");
+  const inline=t.inline?`<button class="btn" data-toast="Pulling ${esc(t.up.replace(" ↑",""))}">update</button>`:"";
+  const keys=[...t.f,...t.tags.map(x=>x[0]),t.fav?"★":"",t.usedNever?"never":""].filter(Boolean).join(" ");
+  return `<tr data-i="${i}" data-f="${keys}"${i===0?' class="sel"':""}>
+    <td><span class="nm"><button class="fav${t.fav?" on":""}" data-fav="${i}" aria-label="Favorite" aria-pressed="${!!t.fav}">${t.fav?"★":"☆"}</button>${esc(t.n)}<span class="tags">${tags}</span><span class="sub">${esc(t.d)}</span></span></td>
+    <td><span class="linkrow">${links}</span></td>
+    <td><span class="chip ${t.state[1]}">${t.state[0]}</span></td>
+    <td class="m">${t.v}</td>
+    <td class="m${t.upNew?" new":""}">${t.up}</td>
+    <td class="m${t.usedNever?" never":""}">${t.used}</td>
+    <td><span class="rowacts">${inline}<span class="menu"><button class="dd">${inline?"▾":"Actions ▾"}</button></span></span></td></tr>`;
+}
+function keysOf(t){return [...t.f,...t.tags.map(x=>x[0]),t.fav?"★":"",t.usedNever?"never":""].filter(Boolean);}
+function paint(f){
+  const hit=t=>!f||f==="all"||keysOf(t).includes(f);
+  $("#rows").innerHTML=TOOLS.filter(hit).map((t)=>rowHTML(t,TOOLS.indexOf(t))).join("")
+    ||`<tr><td colspan="7" style="color:var(--ink3);padding:18px 11px">Nothing here yet — that's the point. Retired fills as you judge.</td></tr>`;
+}
+paint("all");
+
+/* ---- catalog ---- */
+function cards(src,q=""){
+  const list=CATALOG[src].filter(c=>!q||(c.n+c.d).toLowerCase().includes(q.toLowerCase()));
+  $("#cards").innerHTML=list.map(c=>`<div class="card${c.have?" have":""}">
+    <div class="ch"><b>${esc(c.n)}</b>${c.have?'<span class="chip c-ok">on your shelf</span>':""}</div>
+    <p>${esc(c.d)}</p>
+    <div class="cf">${c.have?'<button class="btn" data-toast="Already tracked — jumping to its row">Go to row</button>'
+      :`<button class="btn pri" data-toast="Added ${esc(c.n)} → Tracked. Nothing installed.">Track</button><button class="btn" data-toast="Trying ${esc(c.n)} in Docker">Try</button>`}
+      <span class="by">${esc(c.by)}</span></div></div>`).join("")
+    ||`<p style="color:var(--ink3);grid-column:1/-1;padding:6px 2px">No match.</p>`;
+}
+const SRCK=["docker","anthropic","community","github"];
+cards("docker");
+$("#srcbar").addEventListener("click",e=>{const b=e.target.closest(".src");if(!b)return;
+  $$("#srcbar .src").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  cards(SRCK[$$("#srcbar .src").indexOf(b)],$("#q").value);});
+$("#q").addEventListener("input",()=>cards(SRCK[$$("#srcbar .src").findIndex(x=>x.classList.contains("on"))],$("#q").value));
+
+/* ---- delegated clicks ---- */
+document.addEventListener("click",e=>{
+  const pop=e.target.closest(".menu-pop");
+  if(!pop)$$(".menu-pop").forEach(p=>p.remove());
+
+  const t=e.target.closest("[data-toast]");
+  if(t){toast(t.dataset.toast);return;}
+
+  const dd=e.target.closest(".dd");
+  if(dd){e.stopPropagation();
+    const row=dd.closest("tr"),tool=TOOLS[+row.dataset.i];
+    const m=document.createElement("div");m.className="menu-pop";
+    m.innerHTML=tool.acts.map(a=>a[0]==="-"?"<hr>":
+      `<button data-toast="${esc(a[0])} · ${esc(tool.n)}"${/Retire|Unregister|Tear|Delete/.test(a[0])?' class="danger"':""}>
+         <span>${esc(a[0])}</span>${a[1]?`<span class="mhint">${esc(a[1])}</span>`:""}</button>`).join("");
+    dd.closest(".menu").appendChild(m);return;}
+
+  const row=e.target.closest("#rows tr");
+  if(row&&!e.target.closest(".lk")){$$("#rows tr").forEach(r=>r.classList.remove("sel"));row.classList.add("sel");
+    const tool=TOOLS[+row.dataset.i];if(tool)toast("Selected "+tool.n+" — detail pane follows the row");}
+
+  const f=e.target.closest("#filters .tab");
+  if(f){$$("#filters .tab").forEach(x=>x.classList.remove("on"));f.classList.add("on");paint(f.dataset.f);}
+
+  const dt=e.target.closest(".dtab");
+  if(dt){$$(".dtab").forEach(x=>x.classList.remove("on"));dt.classList.add("on");
+    ["details","readme","changelog","run","log","comments"].forEach(p=>
+      $$(".pane-"+p).forEach(el=>el.classList.toggle("hidden",p!==dt.dataset.p)));}
+
+  const tg=e.target.closest("#targets .tgt");
+  if(tg&&tg.tagName==="BUTTON"){const on=tg.getAttribute("aria-pressed")==="true";
+    tg.setAttribute("aria-pressed",!on);tg.classList.toggle("on",!on);
+    tg.querySelector(".box").textContent=!on?"✓":"";
+    const n=$$('#targets .tgt[aria-pressed="true"]').length;
+    $("#reg").textContent=n?`Register in ${n}`:"Select a target";}
+
+  const au=e.target.closest("#autoupd");
+  if(au){const on=au.getAttribute("aria-pressed")==="true";au.setAttribute("aria-pressed",!on);
+    toast(!on?"Auto update ON — tracks latest on every refresh":"Auto update OFF (default) — you approve each one");}
+
+  const add=e.target.closest("[data-add]");
+  if(add){const u=$("#addurl").value.trim();
+    toast(u?`${add.dataset.add}: ${u.split("/").slice(-1)[0]}`:"Paste a repo URL first");}
+
+  if(e.target.closest("#reg")){const n=$$('#targets .tgt[aria-pressed="true"]').length;
+    toast(n?`Wrote ${n} config${n>1?"s":""} · backups kept · undo available`:"Nothing selected");}
+
+  if(e.target.closest("#refresh")){
+    $("#stamp").textContent="refreshed "+new Date().toISOString().slice(0,19).replace("T"," ");
+    toast("Re-read disk, package managers, configs, atom feeds");}
+});
+/* ---- favorites + pill filters ---- */
+document.addEventListener("click",e=>{
+  const fv=e.target.closest("[data-fav]");
+  if(fv){e.stopPropagation();const t=TOOLS[+fv.dataset.fav];t.fav=!t.fav;
+    fv.classList.toggle("on",t.fav);fv.textContent=t.fav?"★":"☆";fv.setAttribute("aria-pressed",!!t.fav);
+    $("#favCount")&&($("#favCount").textContent=TOOLS.filter(x=>x.fav).length);
+    toast(t.fav?`★ ${t.n} favorited — pinned to the top of every view`:`${t.n} unfavorited`);return;}
+  const p=e.target.closest(".pil");
+  if(p){$$(".pil").forEach(x=>x.classList.remove("on"));p.classList.add("on");
+    paint(p.dataset.fq||"all");
+    $$("#filters .tab").forEach(x=>x.classList.toggle("on",x.dataset.f==="all"));}
+});
+
+/* ---- command palette ---- */
+const CMDS=[
+  ["> Try in Docker","local sandbox, one-click teardown","action"],
+  ["> Refresh everything","disk, package managers, configs, feeds","action"],
+  ["> Register MCP…","pick tool, pick clients","action"],
+  ["> Show never-used","the retire candidates","action"],
+  ["> Run topgrade --dry-run","","action"],
+];
+function palRows(q){
+  const s=q.trim().toLowerCase();
+  const isCmd=s.startsWith(">");
+  const pool=isCmd?CMDS.map(c=>({n:c[0],d:c[1],k:c[2]}))
+    :TOOLS.map(t=>({n:t.n,d:t.d,k:t.state[0],fav:t.fav}))
+      .concat(Object.entries(CATALOG).flatMap(([src,list])=>list.map(c=>({n:c.n,d:c.d,k:src}))));
+  const q2=isCmd?s.slice(1).trim():s;
+  const hit=pool.filter(r=>!q2||(r.n+" "+r.d).toLowerCase().includes(q2));
+  hit.sort((a,b)=>(b.fav?1:0)-(a.fav?1:0));
+  return hit.slice(0,40);
+}
+let palI=0,palCur=[];
+function drawPal(){
+  const q=$("#palq").value;palCur=palRows(q);palI=Math.min(palI,Math.max(0,palCur.length-1));
+  $("#pallist").innerHTML=palCur.map((r,i)=>
+    `<button class="pal-row${i===palI?" cur":""}" data-pi="${i}">
+      <span class="pn">${r.fav?"★ ":""}${esc(r.n)}</span><span class="pd">${esc(r.d||"")}</span><span class="pk">${esc(r.k)}</span></button>`
+  ).join("")||`<div style="padding:14px;color:var(--ink3);font-size:13px">No match — press ↵ to add it as a tracked URL.</div>`;
+  $("#palcount").textContent=palCur.length+" of 1,284";
+  $("#pallist").querySelector(".cur")?.scrollIntoView({block:"nearest"});
+}
+function openPal(){$("#pal").hidden=false;$("#palq").value="";palI=0;drawPal();$("#palq").focus();}
+function closePal(){$("#pal").hidden=true;}
+$("#palbtn").addEventListener("click",openPal);
+$("#palq").addEventListener("input",()=>{palI=0;drawPal();});
+document.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();openPal();return;}
+  if($("#pal").hidden)return;
+  if(e.key==="Escape")closePal();
+  else if(e.key==="ArrowDown"){e.preventDefault();palI=Math.min(palI+1,palCur.length-1);drawPal();}
+  else if(e.key==="ArrowUp"){e.preventDefault();palI=Math.max(palI-1,0);drawPal();}
+  else if(e.key==="Enter"){const r=palCur[palI];closePal();toast(r?`${r.n} — ${r.k}`:"Added as tracked");}
+});
+$("#pal").addEventListener("click",e=>{
+  if(e.target.id==="pal"){closePal();return;}
+  const r=e.target.closest("[data-pi]");
+  if(r){const it=palCur[+r.dataset.pi];closePal();toast(`${it.n} — ${it.k}`);}
+});
+
+</script>

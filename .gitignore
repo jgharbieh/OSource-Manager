@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local runtime state — the DB, settings and config backups live in ~/.osource
+.osource/
+*.db
+*.db-wal
+*.db-shm
+
+# tooling scratch
+.playwright-mcp/
+*.log
+
+# stale Phase 1/2 captures — re-shoot once the UI is final, then un-ignore
+osm-*.png
+osm-*.jpeg
+
+# editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

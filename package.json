@@ -1,0 +1,28 @@
+{
+  "name": "osource-manager",
+  "version": "0.1.0",
+  "description": "See it, try it, keep it or kill it — local tool/source registry",
+  "type": "module",
+  "bin": {
+    "osm": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && tsc -p tsconfig.json && vite build",
+    "dev": "tsc --noEmit && tsc -p tsconfig.json && vite build && node dist/cli.js serve",
+    "mcp": "node dist/cli.js mcp",
+    "test": "node --test",
+    "test:core": "tsc -p tsconfig.json && node --experimental-strip-types --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "MIT"
+}
