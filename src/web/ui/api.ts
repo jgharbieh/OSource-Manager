@@ -246,9 +246,11 @@ export async function tryTool(id: number, confirm: boolean): Promise<Op<TrialRun
   return reqOp<TrialRun>('POST', `/api/tools/${id}/try`, { confirm });
 }
 
-/** Clone into a container-only checkout (named volume + idle container). */
-export async function cloneTool(id: number): Promise<Op<SandboxResult>> {
-  return reqOp<SandboxResult>('POST', `/api/tools/${id}/clone`, {});
+/** Clone into a container-only checkout (named volume + idle container).
+ *  mode 'run' additionally installs the repo's dependencies inside it, which
+ *  executes third-party code and needs network — always an explicit choice. */
+export async function cloneTool(id: number, mode: 'inspect' | 'run' = 'inspect'): Promise<Op<SandboxResult>> {
+  return reqOp<SandboxResult>('POST', `/api/tools/${id}/clone`, { mode });
 }
 
 export async function tearDownTool(id: number): Promise<Op<TeardownReport>> {

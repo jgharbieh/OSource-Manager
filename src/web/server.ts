@@ -515,7 +515,22 @@ export async function createOsmServer(
       // never onto the host disk
       if (method === 'POST' && id !== undefined && segments[3] === 'clone' && segments.length === 4) {
         const body = await parseJsonBody(req);
-        sendJson(res, 200, await cloneIntoSandboxOp(db, id, { fullHistory: boolField(body, 'fullHistory') }));
+        // 'run' executes the repo's own dependency install and needs network, so
+        // it is never a default — the caller has to name it.
+        if (body.mode !== undefined && body.mode !== 'inspect' && body.mode !== 'run') {
+          throw new HttpError(400, "mode must be 'inspect' or 'run'");
+        }
+        sendJson(
+          res,
+          200,
+          await cloneIntoSandboxOp(db, id, {
+            fullHistory: boolField(body, 'fullHistory'),
+            ...(body.mode === 'run' ? { mode: 'run' as const } : {}),
+            ...(typeof body.runtimeImage === 'string' && body.runtimeImage.trim() !== ''
+              ? { runtimeImage: body.runtimeImage.trim() }
+              : {}),
+          }),
+        );
         return;
       }
       // POST /api/tools/:id/teardown — removes only OSM-created resources
