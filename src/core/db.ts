@@ -290,6 +290,17 @@ export function updateToolVerdict(db: Db, id: number, verdict: Verdict, retireRe
     .run(verdict, retireReason, now(), id);
 }
 
+/**
+ * Repoint a tool at a different canonical identity — the manual correction for
+ * a row discovery got wrong (e.g. a vendored clone detected as `local:<hash>`
+ * when it is really a github repo). Callers MUST check for a key collision
+ * first; the column is UNIQUE, so a clash throws here.
+ */
+export function updateCanonicalKey(db: Db, id: number, key: string, kind: ToolKind): void {
+  db.prepare('UPDATE tools SET canonical_key = ?, kind = ?, updated_at = ? WHERE id = ?')
+    .run(key, kind, now(), id);
+}
+
 export function touchUpdatedAt(db: Db, toolId: number): void {
   db.prepare('UPDATE tools SET updated_at = ? WHERE id = ?').run(now(), toolId);
 }

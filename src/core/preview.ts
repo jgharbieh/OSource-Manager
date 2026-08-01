@@ -49,6 +49,10 @@ function fail<T = never>(message: string): OpResult<T> {
   return { ok: false, message };
 }
 
+function firstLine(s: string): string {
+  return s.split(/\r?\n/).find(l => l.trim() !== '')?.trim() ?? '';
+}
+
 interface GitResult {
   ran: boolean;
   stdout: string;
@@ -87,7 +91,25 @@ function diskInstallPath(db: Db, toolId: number): string | null {
 
 // --- preview_update ---
 
-export function previewUpdate(db: Db, toolId: number): OpResult<UpdatePreview> {
+export interface PreviewUpdateOpts {
+  /**
+   * Run `git fetch <remote> <branch>` when the remote commit is not in the
+   * local object store, so ancestry CAN be verified.
+   *
+   * Default false — plain `previewUpdate` stays byte-identical-after, which is
+   * what the read-only GET route promises. With this on, the only thing that
+   * changes is the object store and the remote-tracking ref: HEAD, the index
+   * and the worktree are untouched, so `git status` is still identical. It is
+   * exposed as a separate POST route so the mutation is explicit and consented.
+   */
+  fetchRemote?: boolean;
+}
+
+export function previewUpdate(
+  db: Db,
+  toolId: number,
+  opts: PreviewUpdateOpts = {},
+): OpResult<UpdatePreview> {
   try {
     const tool = selectTool(db, toolId);
     if (!tool) return fail(`tool ${toolId} not found`);
@@ -154,7 +176,14 @@ export function previewUpdate(db: Db, toolId: number): OpResult<UpdatePreview> {
     // Fast-forward check needs the remote object locally. If it is missing we
     // CANNOT verify ancestry without fetching — and fetching is a mutation we
     // never perform. Report honestly instead.
-    const haveObject = git(['cat-file', '-e', `${remoteSha}^{commit}`], dir);
+    let haveObject = git(['cat-file', '-e', `${remoteSha}^{commit}`], dir);
+    if (!haveObject.ran && opts.fetchRemote) {
+      const fetched = git(['fetch', '--quiet', remote, branch], dir);
+      if (!fetched.ran) {
+        return refuse(`git fetch ${remote} ${branch} failed: ${firstLine(fetched.stderr)}`);
+      }
+      haveObject = git(['cat-file', '-e', `${remoteSha}^{commit}`], dir);
+    }
     if (!haveObject.ran) {
       return refuse('cannot verify fast-forward without fetching (run git fetch first)');
     }

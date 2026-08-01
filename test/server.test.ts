@@ -317,9 +317,11 @@ test('POST /api/refresh invokes the onRefresh callback and returns its report', 
 test('Phase-2 read-only routes pass OpResult through without a token (non-github tool, no network)', async () => {
   const { base, token } = await startServer();
 
-  // npm-package tool: checkUpstream refuses non-github hosts before any fetch,
-  // and preview/plan-trial refuse tools with no present disk installation.
-  const tracked = await api(base, '/api/tools/track', postJson(token, { name: 'left-pad' }));
+  // A local binary has no host adapter at all: checkUpstream refuses before any
+  // fetch, and preview/plan-trial refuse tools with no present disk
+  // installation. NOT an npm package — npm keys now resolve against the live
+  // registry, and this test must never touch the network.
+  const tracked = await api(base, '/api/tools/track', postJson(token, { name: 'C:\tools\thing.exe' }));
   assert.equal(tracked.body.ok, true);
   const id = tracked.body.data.id as number;
 
@@ -346,7 +348,8 @@ test('Phase-2 read-only routes pass OpResult through without a token (non-github
 
 test('POST /api/upstream/refresh requires the token and reports checked/errors', async () => {
   const { base, token } = await startServer();
-  await api(base, '/api/tools/track', postJson(token, { name: 'left-pad' }));
+  // Local binary, not an npm package: nothing here has a live upstream to reach.
+  await api(base, '/api/tools/track', postJson(token, { name: 'C:\tools\thing.exe' }));
 
   const denied = await api(base, '/api/upstream/refresh', postJson(null, {}));
   assert.equal(denied.status, 403);
@@ -356,7 +359,7 @@ test('POST /api/upstream/refresh requires the token and reports checked/errors',
   assert.equal(badLimit.status, 400);
   assert.equal(badLimit.body.ok, false);
 
-  // Only a non-github tool is tracked → zero live checks, zero network.
+  // Only a hostless tool is tracked → zero live checks, zero network.
   const res = await api(base, '/api/upstream/refresh', postJson(token, { limit: 25 }));
   assert.equal(res.status, 200);
   assert.equal(res.body.ok, true);

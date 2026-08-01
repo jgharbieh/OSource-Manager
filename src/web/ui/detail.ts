@@ -8,7 +8,18 @@
 //     after 2.6s is not a place to put an error someone has to act on.
 //  3. Every action shows that it started. Buttons hold a pending state until
 //     their flow finishes; the flow itself reports in its own dialog.
-import { getMcpTargets, getTool, getTrialLogs, getTrialPlan, getUpstream, patchTool, postComment, type Op } from './api.js';
+import {
+  getMcpTargets,
+  getReadme,
+  getTool,
+  getTrialLogs,
+  getTrialPlan,
+  getUpstream,
+  patchTool,
+  postComment,
+  setUpstream,
+  type Op,
+} from './api.js';
 import { state, handlers } from './state.js';
 import { menuItems, stateChips } from './manage.js';
 import { initTagging, openTagsFor, runFlow } from './actions.js';
@@ -35,6 +46,7 @@ import {
 import type { Comment, Installation, Tag } from '../../core/types.js';
 import type { UpstreamResult } from '../../core/github.js';
 import type { TrialPlan } from '../../core/preview.js';
+import type { ReadmeDoc } from '../../core/readme.js';
 import type { TrialLogs } from '../../core/trial.js';
 import type { TargetStatus } from '../../core/registrar.js';
 import type { ToolDetail } from './api.js';
@@ -67,8 +79,16 @@ function renderDetails(t: ToolDetail): void {
         )
         .join('<br>')
     : '<span style="color:var(--ink3)">not found on disk</span>';
+  // Discovery guesses identity from disk and gets it wrong for a repo that
+  // arrived without a git remote. The fix has to live where the wrong value is
+  // shown, not in a settings screen.
+  const fixBtn = `<button class="mini" id="det-setup" title="Point this row at its real repo">${web ? 'change' : 'set upstream…'}</button>`;
   const rows: Array<[string, string]> = [
-    ['upstream', web ? `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(t.canonical_key)}</a>` : esc(t.canonical_key)],
+    [
+      'upstream',
+      (web ? `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(t.canonical_key)}</a>` : esc(t.canonical_key)) +
+        ` ${fixBtn}`,
+    ],
     ['kind', esc(t.kind)],
     ['on disk', installs],
     ['added', `${timeHTML(t.added_at)} <span style="color:var(--ink3)">${esc(fmtStamp(t.added_at))}</span>`],
@@ -81,6 +101,24 @@ function renderDetails(t: ToolDetail): void {
     ? `<div class="notes"><b>Your note:</b> ${esc(t.why_i_want_it)}</div>`
     : `<div class="notes" style="border-left-color:var(--line)"><b>No "why" recorded.</b> Add one in Comments — the shelf is only useful if a six-month-old row can explain itself.</div>`;
   $('#pane-details').innerHTML = html;
+  $maybe('#det-setup')?.addEventListener('click', () => void askUpstream(t));
+}
+
+/** Prompt for the real repo URL and repoint the row. */
+async function askUpstream(t: ToolDetail): Promise<void> {
+  const guess = repoWebUrl(t.canonical_key) || '';
+  const url = window.prompt(
+    `Upstream repo for ${t.name}\n\nPaste the repo URL. The old key is kept as an alias, so nothing is lost and the row keeps its tags, note and journal.`,
+    guess,
+  );
+  if (url === null || url.trim() === '') return;
+  try {
+    const res = await setUpstream(t.id, url.trim());
+    toast(res.message);
+    if (res.ok) await handlers.reload?.();
+  } catch (e) {
+    errToast(e);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -225,28 +263,66 @@ function renderAutoUpdate(t: ToolDetail): void {
 /* Readme                                                              */
 /* ------------------------------------------------------------------ */
 
-function renderReadme(t: ToolDetail): void {
+/** Rendered README, images and video embeds included. GitHub renders the
+ *  markdown for us (see core/readme.ts) — this only frames it. */
+function renderReadme(res: Op<ReadmeDoc>, t: ToolDetail): void {
   const web = repoWebUrl(t.canonical_key);
   const disk = t.installations.find((i) => i.present === 1 && /[\\/]/.test(i.where_));
-  const body = web
-    ? emptyState({
-        title: 'No README stored',
-        detail:
-          'OSM keeps a registry, not a copy of your repos — it never mirrors repo files into its database, so there is nothing local to render here. The upstream copy is one click away.' +
-          (disk ? ` There is also a checkout on this machine at ${disk.where_}.` : ''),
-        actions: [
-          { id: 'rm-open', label: 'Read it upstream ↗', primary: true, href: `${web}#readme` },
-          ...(disk ? [{ id: 'rm-copy', label: 'Copy the local path' }] : []),
-        ],
-      })
-    : emptyState({
-        title: 'No README — and nowhere to look for one',
-        detail: `${t.name} has no upstream repository on record (kind: ${t.kind}, key: ${t.canonical_key}). A README only exists for tools that came from a repo.`,
-      });
-  $('#pane-readme').innerHTML = `<span class="lbl">README.md — from the repo</span>${body}`;
-  if (disk) {
-    $maybe('#rm-copy')?.addEventListener('click', () => void copyText(disk.where_, 'path copied'));
+  const setLabel = (source: string): void => {
+    $('#readme-lbl').innerHTML =
+      `README — ${esc(source)}${web ? ` · <a href="${esc(web)}#readme" target="_blank" rel="noopener">open upstream ↗</a>` : ''}`;
+  };
+
+  if (!res.ok || !res.data) {
+    const actions = [
+      ...(web ? [{ id: 'rm-open', label: 'Read it upstream ↗', primary: true, href: `${web}#readme` }] : []),
+      ...(disk ? [{ id: 'rm-copy', label: 'Copy the local path' }] : []),
+      { id: 'rm-retry', label: 'Try again' },
+    ];
+    const body = looksEmptyNotBroken(res.message)
+      ? emptyState({
+          title: web ? 'No README to read' : 'No README — and nowhere to look for one',
+          detail: web
+            ? res.message
+            : `${t.name} has no upstream repository on record (kind: ${t.kind}, key: ${t.canonical_key}), and no checkout on this disk. Set its upstream in Details and this tab starts working.`,
+          actions,
+        })
+      : errorState({ title: 'Could not load the README', detail: res.message, actions });
+    setLabel('not loaded');
+    setBody('#readme-body', body);
+    if (disk) {
+      // `skills-dir:` is OSM's scan-source prefix, not part of the path.
+      const path = disk.where_.startsWith('skills-dir:') ? disk.where_.slice('skills-dir:'.length) : disk.where_;
+      $maybe('#rm-copy')?.addEventListener('click', () => void copyText(path, 'path copied'));
+    }
+    wireRetry('rm-retry', () => loadLazyTab('readme', t.id));
+    return;
   }
+
+  const d = res.data;
+  // format:'html' is GitHub's own rendered output, re-sanitized server-side.
+  // format:'text' is a raw local file and MUST be escaped.
+  const inner = d.format === 'html' ? d.body : `<pre class="md-raw">${esc(d.body)}</pre>`;
+  const note = d.truncated
+    ? `<div class="notes" style="border-left-color:var(--warn)"><b>Truncated.</b> This README is larger than OSM renders inline — read the full one upstream.</div>`
+    : '';
+  setLabel(d.source);
+  setBody('#readme-body', `<div class="md-body">${inner}</div>${note}`);
+  hideDeadImages();
+}
+
+/** A badge whose host stopped serving it (dead shields.io, expired CDN, a camo
+ *  URL GitHub itself 502s) would otherwise sit in the middle of a paragraph as a
+ *  broken-image glyph. No inline onerror — those are stripped server-side. */
+function hideDeadImages(): void {
+  document.querySelectorAll('#readme-body img').forEach((img) => {
+    if (!(img instanceof HTMLImageElement)) return;
+    if (img.complete && img.naturalWidth === 0) {
+      img.classList.add('dead');
+      return;
+    }
+    img.addEventListener('error', () => img.classList.add('dead'), { once: true });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -509,7 +585,12 @@ function wireRetry(id: string, fn: () => void): void {
 /** Load the lazily-fetched tab bodies. Each open re-checks live. */
 function loadLazyTab(pane: string, id: number): void {
   if (pane === 'readme') {
-    if (current && current.id === id) renderReadme(current);
+    setBody('#readme-body', loadingState('fetching the README from the repo — images and embeds included…'));
+    void getReadme(id)
+      .then((res) => {
+        if (state.selectedId === id && current) renderReadme(res, current);
+      })
+      .catch((e) => tabCrash('#readme-body', id, 'Loading the README failed', e, () => loadLazyTab('readme', id)));
     return;
   }
   if (pane === 'changelog') {

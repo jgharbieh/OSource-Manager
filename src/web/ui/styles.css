@@ -348,3 +348,55 @@ tr.hintrow > td{background:var(--sunk);color:var(--ink2);font-size:12px;padding:
 tr.hintrow.err > td{background:var(--crit-soft);color:var(--ink)}
 tr.hintrow .btn{margin-left:6px}
 tr.hintrow .pil{margin:0 1px}
+
+/* --- rendered README (GitHub's own HTML, sanitized server-side) ---
+   Scoped hard to .md-body: third-party markup must never restyle the app. */
+.md-body{font-size:13.5px;line-height:1.62;color:var(--ink);
+  width:100%;min-width:0;max-height:62vh;overflow-y:auto;overflow-x:hidden;
+  padding:2px 10px 10px 2px;margin-top:8px;overflow-wrap:anywhere;word-break:break-word}
+/* Only the genuinely-wide children scroll. The pane itself never does — a
+   horizontal scrollbar on the panel means the README escaped its container. */
+.md-body>*{max-width:100%}
+.md-body img,.md-body video,.md-body svg{max-width:100%;height:auto;border-radius:var(--r);display:block;margin:10px 0}
+.md-body video{background:#000}
+.md-body h1,.md-body h2,.md-body h3,.md-body h4{color:var(--ink);font-weight:700;line-height:1.3;margin:18px 0 8px}
+.md-body h1{font-size:19px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.md-body h2{font-size:16px;border-bottom:1px solid var(--line);padding-bottom:5px}
+.md-body h3{font-size:14.5px}
+.md-body h1:first-child,.md-body h2:first-child{margin-top:2px}
+.md-body p{margin:9px 0}
+.md-body a{color:var(--accent)}
+.md-body ul,.md-body ol{margin:9px 0;padding-left:22px}
+.md-body li{margin:3px 0}
+.md-body li>p{margin:3px 0}
+.md-body code{font-family:var(--mono);font-size:12px;background:var(--sunk);border-radius:4px;padding:1.5px 5px}
+.md-body pre{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 13px;overflow-x:auto;margin:11px 0}
+.md-body pre code{background:none;padding:0;font-size:12px;line-height:1.55}
+.md-body blockquote{margin:11px 0;padding:2px 0 2px 13px;border-left:2px solid var(--line);color:var(--ink2)}
+/* GitHub wraps every table in <markdown-accessiblity-table>, an unknown element
+   that defaults to display:inline — so a table's max-width:100% had no definite
+   containing block and overflowed the pane. The wrapper is the scroll box. */
+.md-body markdown-accessiblity-table{display:block;max-width:100%;overflow-x:auto}
+.md-body table{border-collapse:collapse;margin:11px 0;display:table;width:max-content;max-width:100%}
+/* GitHub's per-heading anchor links (octicon chain glyphs) are chrome for
+   github.com, noise here — and they render as a stray link on its own line. */
+.md-body .anchor,.md-body .octicon-link{display:none}
+.md-body .markdown-heading{display:block}
+/* An image the upstream host no longer serves (dead badge, expired CDN) must
+   not leave a broken-image glyph mid-paragraph. Verified: openwhispr's
+   star-history badge returns HTTP 502. */
+.md-body img.dead{display:none}
+.md-body a:has(> img.dead){display:none}
+.md-body th,.md-body td{border:1px solid var(--line);padding:6px 10px;text-align:left;font-size:12.5px}
+.md-body th{background:var(--sunk);font-weight:700}
+.md-body hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.md-body input[type=checkbox]{margin-right:6px}
+.md-body [data-blocked-url]{color:var(--ink3);text-decoration:line-through}
+.md-raw{font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;
+  background:var(--sunk);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;margin:0}
+
+/* inline "fix this field" button, e.g. the upstream row in Details */
+.mini{font:inherit;font-size:10.5px;letter-spacing:.02em;color:var(--ink3);background:var(--sunk);
+  border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-left:6px;cursor:pointer;vertical-align:1px}
+.mini:hover{color:var(--accent);border-color:var(--accent)}

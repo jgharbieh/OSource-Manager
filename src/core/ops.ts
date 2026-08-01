@@ -16,12 +16,23 @@ import {
   selectToolView,
   selectToolViews,
   selectTools,
+  updateCanonicalKey,
   updateToolVerdict,
+  upsertObservations,
   upsertTag,
   withTransaction,
 } from './db.js';
 import { checkUpstream, refreshAllUpstream, type UpstreamResult } from './github.js';
-import { planTrial, previewUpdate, type TrialPlan, type UpdatePreview } from './preview.js';
+import {
+  planTrial,
+  previewUpdate,
+  type PreviewUpdateOpts,
+  type TrialPlan,
+  type UpdatePreview,
+} from './preview.js';
+import { getReadme, type ReadmeDoc } from './readme.js';
+import { openToolPath, type OpenResult } from './shell.js';
+import { cloneIntoSandbox, type SandboxOpts, type SandboxResult } from './sandbox.js';
 import {
   tearDown,
   trialLogs,
@@ -396,11 +407,122 @@ export async function refreshAllUpstreamOp(
   }
 }
 
-export function previewUpdateOp(db: Db, toolId: number): OpResult<UpdatePreview> {
+export function previewUpdateOp(
+  db: Db,
+  toolId: number,
+  opts: PreviewUpdateOpts = {},
+): OpResult<UpdatePreview> {
   try {
-    return previewUpdate(db, toolId);
+    return previewUpdate(db, toolId, opts);
   } catch (err) {
     return fail(`preview failed: ${String(err)}`);
+  }
+}
+
+/** The tool's README, fetched at read time (nothing is mirrored into the DB). */
+export async function readmeOp(db: Db, toolId: number): Promise<OpResult<ReadmeDoc>> {
+  try {
+    return await getReadme(db, toolId);
+  } catch (err) {
+    return fail(`readme failed: ${String(err)}`);
+  }
+}
+
+/** Open the tool's folder/file with the OS default handler. */
+export function openToolPathOp(db: Db, toolId: number): OpResult<OpenResult> {
+  try {
+    return openToolPath(db, toolId);
+  } catch (err) {
+    return fail(`open failed: ${String(err)}`);
+  }
+}
+
+/**
+ * Correct a row's upstream by hand.
+ *
+ * Discovery guesses identity from what is on disk, and it guesses wrong when a
+ * repo arrived without a git remote (a downloaded copy, a vendored skill) — the
+ * row then has a `local:<hash>` or `skill:<name>` key, so there is no changelog,
+ * no README and no update path for it. This is the manual override, journalled
+ * like every other decision. Owned fields (verdict, why, tags) are preserved.
+ */
+export function setUpstreamOp(db: Db, toolId: number, url: string): OpResult<ToolView> {
+  try {
+    const tool = selectTool(db, toolId);
+    if (!tool) return fail(`tool ${toolId} not found`);
+    const raw = url.trim();
+    if (!raw) return fail('a repo URL is required');
+
+    const key = canonicalKeyForGitUrl(raw);
+    if (!key) return fail(`not a recognized git URL: ${raw}`);
+    if (key === tool.canonical_key) return fail(`${tool.name} already points at ${key}`);
+
+    const clash = selectToolByCanonicalKey(db, key);
+    if (clash && clash.id !== toolId) {
+      return fail(
+        `${key} is already on the shelf as "${clash.name}" (#${clash.id}) — retire one of the two instead of pointing both at it`,
+      );
+    }
+
+    const from = tool.canonical_key;
+    return withTransaction(db, () => {
+      updateCanonicalKey(db, toolId, key, 'repo');
+      addAlias(db, toolId, from);
+      for (const alias of aliasesForGitUrl(raw)) addAlias(db, toolId, alias);
+      // The old upstream reading is about a different repo now.
+      upsertObservations(db, toolId, {
+        version_upstream: null,
+        update_available: 0,
+        feed_etag: null,
+        upstream_checked_at: null,
+      });
+      addEvent(db, toolId, `upstream set by hand: ${from} → ${key}`);
+      const view = viewOrFail(db, toolId);
+      return ok(`${tool.name} now points at ${key}`, view ?? undefined);
+    });
+  } catch (err) {
+    return fail(`set upstream failed: ${String(err)}`);
+  }
+}
+
+export interface AutoUpdateSweep {
+  applied: { name: string; message: string }[];
+  failed: { name: string; message: string }[];
+  /** Tools with an update available but auto-update off — the reason the sweep
+   *  looks like it "did nothing". Named so the UI can say so. */
+  skipped: string[];
+}
+
+/**
+ * Apply updates to every tool that opted in.
+ *
+ * The per-row Auto update toggle is a promise, and until this existed it was an
+ * empty one: the flag was stored and nothing ever read it. Repos only, and
+ * strictly through applyUpdate, so the same fast-forward-only preconditions and
+ * journalling apply as a hand-clicked update. Global CLIs stay gated.
+ */
+export async function autoUpdateSweepOp(db: Db): Promise<OpResult<AutoUpdateSweep>> {
+  const out: AutoUpdateSweep = { applied: [], failed: [], skipped: [] };
+  try {
+    for (const tool of selectTools(db)) {
+      if (tool.verdict === 'retired') continue;
+      const obs = selectObservations(db, tool.id);
+      if (obs?.update_available !== 1) continue;
+      if (tool.auto_update !== 1) {
+        out.skipped.push(tool.name);
+        continue;
+      }
+      const res = await applyUpdate(db, tool.id);
+      (res.ok ? out.applied : out.failed).push({ name: tool.name, message: res.message });
+    }
+    const summary = out.applied.length > 0
+      ? `auto-updated ${out.applied.length} tool(s)${out.failed.length > 0 ? `, ${out.failed.length} failed` : ''}`
+      : out.skipped.length > 0
+        ? `nothing to auto-update — ${out.skipped.length} tool(s) have an update but auto-update is off`
+        : 'nothing to auto-update';
+    return ok(summary, out);
+  } catch (err) {
+    return fail(`auto-update sweep failed: ${String(err)}`);
   }
 }
 
@@ -432,6 +554,22 @@ export async function tryItOp(
     return await tryIt(db, toolId, opts);
   } catch (err) {
     return fail(`try_it failed: ${String(err)}`);
+  }
+}
+
+/**
+ * Clone the repo into a container-only checkout (a named volume + an idle
+ * container). Nothing is written to the host disk; teardown removes it.
+ */
+export async function cloneIntoSandboxOp(
+  db: Db,
+  toolId: number,
+  opts: SandboxOpts = {},
+): Promise<OpResult<SandboxResult>> {
+  try {
+    return await cloneIntoSandbox(db, toolId, opts);
+  } catch (err) {
+    return fail(`clone failed: ${String(err)}`);
   }
 }
 

@@ -218,19 +218,34 @@ test('no local version → history incomplete, no update, but latest upstream st
   assert.equal(res.data.update_available, false);
 });
 
-test('non-github keys → ok:false unsupported host', async () => {
+test('unhostable keys → ok:false unsupported host; npm keys go to the registry', async () => {
   const db = tmpDb();
   const gitlab = insertTool(db, { canonical_key: 'gitlab.com/owner/repo', name: 'gl', kind: 'repo' });
-  const npm = insertTool(db, { canonical_key: 'npm:some-cli', name: 'some-cli', kind: 'global-cli' });
-  const fetchImpl = stubFetch(() => { throw new Error('must not be called'); });
+  const local = insertTool(db, { canonical_key: 'local:abc123', name: 'thing', kind: 'binary' });
+  const never = stubFetch(() => { throw new Error('must not be called'); });
 
-  const r1 = await checkUpstream(db, gitlab.id, { fetchImpl });
-  assert.equal(r1.ok, false);
-  assert.match(r1.message, /unsupported host/);
-  const r2 = await checkUpstream(db, npm.id, { fetchImpl });
-  assert.equal(r2.ok, false);
-  assert.match(r2.message, /unsupported host/);
-  assert.equal(fetchImpl.calls.length, 0);
+  for (const id of [gitlab.id, local.id]) {
+    const r = await checkUpstream(db, id, { fetchImpl: never });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /unsupported host/);
+  }
+  assert.equal(never.calls.length, 0);
+
+  // npm:<pkg> IS supported now: the registry is the authority on "am I current"
+  // for a globally-installed CLI, not GitHub Releases.
+  const npm = insertTool(db, { canonical_key: 'npm:some-cli', name: 'some-cli', kind: 'global-cli' });
+  db.prepare(
+    'INSERT INTO installations (tool_id, where_, version_local, present, last_seen_at) VALUES (?, ?, ?, 1, ?)',
+  ).run(npm.id, 'npm-g', '1.0.0', new Date().toISOString());
+  const registry = stubFetch(url => {
+    assert.match(url, /registry\.npmjs\.org\/some-cli/);
+    return fakeRes(200, { 'dist-tags': { latest: '2.5.0' }, time: { '2.5.0': '2026-01-01T00:00:00Z' } });
+  });
+  const res = await checkUpstream(db, npm.id, { fetchImpl: registry });
+  assert.equal(res.ok, true, res.message);
+  assert.equal(res.data.version_upstream, '2.5.0');
+  assert.equal(res.data.update_available, true);
+  assert.equal(selectObservations(db, npm.id).version_upstream, '2.5.0');
 });
 
 test('changelogSince: pure-function cases', () => {
@@ -242,12 +257,11 @@ test('changelogSince: pure-function cases', () => {
   assert.deepEqual(changelogSince([], 'v1'), { entries: [], history_complete: false });
 });
 
-test('refreshAllUpstream checks github repo tools only, collects errors, honors limit', async () => {
+test('refreshAllUpstream checks github repos + npm packages, collects errors, honors limit', async () => {
   const db = tmpDb();
   const t1 = addRepoTool(db, 'github.com/a/one', '1.0.0');
   const t2 = addRepoTool(db, 'github.com/b/two', '1.0.0');
-  addRepoTool(db, 'gitlab.com/c/three', '1.0.0'); // skipped: not github
-  insertTool(db, { canonical_key: 'npm:cli', name: 'cli', kind: 'global-cli' }); // skipped: not repo
+  addRepoTool(db, 'gitlab.com/c/three', '1.0.0'); // skipped: no host adapter
 
   const fetchImpl = stubFetch(url => {
     if (url.includes('/repos/a/one/')) return fakeRes(200, [release('v1.1.0'), release('v1.0.0')]);

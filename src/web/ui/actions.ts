@@ -17,8 +17,10 @@
 import {
   addTag as apiAddTag,
   applyUpdate,
+  cloneTool,
   getMcpTargets,
   getPreviewUpdate,
+  getPreviewUpdateFetching,
   getTrialPlan,
   registerMcp,
   removeTag as apiRemoveTag,
@@ -31,6 +33,7 @@ import { handlers, state } from './state.js';
 import { closeTagEditor, msgOf, openFlow, openTagEditor, toast, type FlowDialog } from './util.js';
 import type { Tag, ToolView } from '../../core/types.js';
 import type { TargetId, TargetStatus } from '../../core/registrar.js';
+import type { UpdatePreview } from '../../core/preview.js';
 
 const DIALOG_CAP = 6000;
 
@@ -119,6 +122,47 @@ export async function tryFlow(t: ToolView): Promise<void> {
   }
 }
 
+/* ---------- clone into a container ---------- */
+
+export async function cloneFlow(t: ToolView): Promise<void> {
+  const dlg = openFlow(`Clone ${t.name} into a container`);
+  try {
+    const ans = await dlg.ask({
+      lead: 'The checkout goes into a Docker volume, not onto your disk — so an untried repo cannot silently become clutter.',
+      consequences: [
+        'a named volume is created and labelled osm.trial=<uid>, and git clone --depth 1 runs inside a container',
+        'nothing is written to this machine’s filesystem — there is no host path to clean up',
+        'the source container idles (sleep infinity); none of the repo’s own code is executed',
+        'Tear down removes the volume, the container, and the git image only if OSM pulled it',
+      ],
+      confirmLabel: 'Clone it in Docker',
+    });
+    if (!ans.confirmed) return;
+
+    dlg.working('pulling the git image if needed, creating the volume, cloning…');
+    const res = await cloneTool(t.id);
+    const d = res.data;
+    const facts = d
+      ? [
+          `volume:    ${d.volume}`,
+          `container: ${d.container}`,
+          `path:      ${d.path}  (inside the container)`,
+          `image:     ${d.image}${d.image_created_by_osm ? ' (pulled by OSM — teardown removes it)' : ' (already here — teardown keeps it)'}`,
+          '',
+          `open a shell:  ${d.exec_hint}`,
+          '',
+          d.entries.length > 0 ? `cloned files: ${d.entries.slice(0, 24).join('  ')}` : '(the clone reported no files)',
+        ].join('\n')
+      : undefined;
+    await dlg.report({ ok: res.ok, message: res.message, pre: facts });
+    await reload();
+  } catch (e) {
+    await crash(dlg, `Cloning ${t.name}`, e);
+  } finally {
+    dlg.close();
+  }
+}
+
 /* ---------- tear_down ---------- */
 
 export async function tearDownFlow(t: ToolView): Promise<void> {
@@ -170,14 +214,41 @@ export async function updateFlow(t: ToolView): Promise<void> {
       await dlg.report({ ok: false, message: pv.message, lead: 'The checkout was not touched.' });
       return;
     }
-    const p = pv.data;
-    const facts = [
-      `local:    ${p.local_version ?? 'unknown'}`,
-      p.upstream_ref ? `upstream: ${p.upstream_ref}` : '',
-      p.ahead_behind ? `ahead/behind: ${p.ahead_behind}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    let p = pv.data;
+    const factsOf = (v: UpdatePreview): string =>
+      [
+        `local:    ${v.local_version ?? 'unknown'}`,
+        v.upstream_ref ? `upstream: ${v.upstream_ref}` : '',
+        v.ahead_behind ? `ahead/behind: ${v.ahead_behind}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+    // The preview is read-only, so it cannot see a commit that has not been
+    // fetched yet — and "run git fetch first" is not an answer for someone
+    // clicking a button. Offer the fetch, then re-check with it done.
+    if (!p.can_update && /without fetching/.test(p.reason)) {
+      const go = await dlg.ask({
+        lead: p.reason,
+        pre: factsOf(p),
+        consequences: [
+          'git fetch downloads the new commits and moves the remote-tracking ref only',
+          'HEAD, your branch, the index and the working tree are all untouched by a fetch',
+          'nothing is merged — you get the same confirmation step afterwards',
+        ],
+        confirmLabel: 'Fetch and re-check',
+      });
+      if (!go.confirmed) return;
+      dlg.working('fetching the remote, then re-checking the preconditions…');
+      const again = await getPreviewUpdateFetching(t.id);
+      if (!again.ok || !again.data) {
+        await dlg.report({ ok: false, message: again.message, lead: 'The checkout was not touched.' });
+        return;
+      }
+      p = again.data;
+    }
+
+    const facts = factsOf(p);
 
     if (!p.can_update) {
       await dlg.report({

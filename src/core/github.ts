@@ -10,6 +10,7 @@
  * Bearer token and is never persisted, logged, or written to the DB.
  */
 import type { OpResult } from './types.js';
+import { npmLatest, npmPackageOf, resolveGithub } from './resolve.js';
 import {
   type Db,
   now,
@@ -138,6 +139,87 @@ function requestHeaders(etag: string | null): Record<string, string> {
 }
 
 /**
+ * Upstream check for an npm-keyed tool: the registry decides the version, and
+ * the repo (if the package declares one) supplies the release notes.
+ */
+async function checkNpmUpstream(
+  db: Db,
+  toolId: number,
+  pkg: string,
+  opts: CheckUpstreamOpts,
+): Promise<OpResult<UpstreamResult>> {
+  const latest = await npmLatest(pkg, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {});
+  if (!latest.ok || !latest.data) {
+    return { ok: false, message: latest.message };
+  }
+  const version = latest.data.version;
+  const localVersion = localVersionFor(db, toolId);
+  const updateAvailable = localVersion !== null && !tagsMatch(localVersion, version);
+
+  upsertObservations(db, toolId, {
+    version_upstream: version,
+    update_available: updateAvailable ? 1 : 0,
+    upstream_checked_at: now(),
+  });
+
+  // Release notes are a bonus, never a reason to fail the check.
+  let releases: ReleaseInfo[] = [];
+  let historyComplete = localVersion !== null;
+  const gh = await resolveGithub(db, toolId, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {});
+  if (gh && updateAvailable && localVersion !== null) {
+    const notes = await fetchReleases(gh, null, localVersion, opts.fetchImpl ?? fetch);
+    if (notes) {
+      const cut = changelogSince(notes.releases, localVersion);
+      releases = cut.entries;
+      historyComplete = cut.history_complete;
+    }
+  }
+
+  return {
+    ok: true,
+    message: updateAvailable
+      ? `npm has ${version} (you have ${localVersion})`
+      : `npm latest: ${version}${localVersion === null ? ' (nothing installed locally)' : ' — up to date'}`,
+    data: {
+      version_upstream: version,
+      update_available: updateAvailable,
+      history_complete: historyComplete,
+      releases,
+      rate_limit_remaining: null,
+    },
+  };
+}
+
+/** Paginated release fetch, shared by the repo and npm paths. Null on any
+ *  failure — a missing changelog must never fail the version check. */
+async function fetchReleases(
+  gh: { owner: string; repo: string },
+  etag: string | null,
+  localVersion: string | null,
+  fetchImpl: typeof fetch,
+): Promise<{ releases: ReleaseInfo[]; etag: string | null } | null> {
+  const baseUrl = `https://api.github.com/repos/${gh.owner}/${gh.repo}/releases`;
+  const releases: ReleaseInfo[] = [];
+  let newEtag: string | null = null;
+  try {
+    for (let page = 1; page <= (localVersion ? MAX_PAGES : 1); page++) {
+      const res = await fetchImpl(`${baseUrl}?per_page=${PER_PAGE}&page=${page}`, {
+        headers: requestHeaders(page === 1 ? etag : null),
+      });
+      if (!res.ok) return null;
+      if (page === 1) newEtag = res.headers.get('etag');
+      const pageReleases = ((await res.json()) as Record<string, unknown>[]).map(toReleaseInfo);
+      releases.push(...pageReleases);
+      if (localVersion && pageReleases.some(r => tagsMatch(r.tag, localVersion))) break;
+      if (!nextLink(res.headers.get('link'))) break;
+    }
+  } catch {
+    return null;
+  }
+  return { releases, etag: newEtag };
+}
+
+/**
  * Check what changed upstream since the locally installed version of a
  * github.com repo tool. Paginates releases (cap MAX_PAGES) until the local
  * tag is found; ETag-caches in observations.feed_etag. Never throws — every
@@ -151,6 +233,14 @@ export async function checkUpstream(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const tool = selectTool(db, toolId);
   if (!tool) return { ok: false, message: `tool ${toolId} not found` };
+
+  // A globally-installed CLI is keyed npm:<pkg>. Its authority for "am I
+  // current" is the npm registry, not GitHub Releases: plenty of packages
+  // publish to npm without cutting a release, and `npm ls -g` compares against
+  // the registry, so OSM must too. The repo (resolved from the package
+  // metadata) is still used for the changelog text.
+  const pkg = npmPackageOf(tool.canonical_key);
+  if (pkg) return await checkNpmUpstream(db, toolId, pkg, opts);
 
   const gh = parseGithubKey(tool.canonical_key);
   if (!gh || tool.kind !== 'repo') {
@@ -193,6 +283,16 @@ export async function checkUpstream(
       }
       if (res.status === 403) {
         return { ok: false, message: rateLimitMessage(res.headers) };
+      }
+      if (res.status === 404) {
+        // A private repo and a deleted one look identical to an unauthenticated
+        // caller. Never report "no releases" for either.
+        return {
+          ok: false,
+          message: process.env.GITHUB_TOKEN
+            ? `github.com/${gh.owner}/${gh.repo} is not visible to your GITHUB_TOKEN (private, renamed or deleted)`
+            : `github.com/${gh.owner}/${gh.repo} returned 404 — private, renamed or deleted. OSM calls GitHub unauthenticated; set GITHUB_TOKEN to check your private repos.`,
+        };
       }
       if (!res.ok) {
         return { ok: false, message: `github api error: HTTP ${res.status}` };
@@ -249,8 +349,12 @@ export async function refreshAllUpstream(
   db: Db,
   opts: RefreshAllOpts = {},
 ): Promise<OpResult<{ checked: number; errors: string[] }>> {
+  // Global CLIs are checked too — their upstream is the npm registry, which is
+  // unauthenticated and not rate-limited the way the GitHub API is.
   const tools = selectTools(db).filter(
-    t => t.kind === 'repo' && parseGithubKey(t.canonical_key) !== null,
+    t =>
+      (t.kind === 'repo' && parseGithubKey(t.canonical_key) !== null) ||
+      npmPackageOf(t.canonical_key) !== null,
   );
   const limited = opts.limit !== undefined ? tools.slice(0, opts.limit) : tools;
 

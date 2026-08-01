@@ -3,15 +3,17 @@
 import {
   addTag as apiAddTag,
   listTools,
+  openToolPath,
   patchTool,
   refreshAll,
   refreshUpstream,
   removeTag as apiRemoveTag,
   retireTool,
+  runAutoUpdate,
   searchTools,
   trackTool,
 } from './api.js';
-import { registerFlow, retireFlow, tearDownFlow, tryFlow, unregisterFlow, updateFlow } from './actions.js';
+import { cloneFlow, registerFlow, retireFlow, tearDownFlow, tryFlow, unregisterFlow, updateFlow } from './actions.js';
 import { state, handlers } from './state.js';
 import type { SortDir, SortKey } from './state.js';
 import { $, esc, errToast, fmtRel, fmtStamp, repoWebUrl, toast } from './util.js';
@@ -54,9 +56,16 @@ function lastSeen(t: ToolView): string | null {
   return best;
 }
 
+/** The path itself — never the `skills-dir:` scan-source prefix, which is
+ *  OSM's bookkeeping and pasted into a shell or Explorer resolves to nothing. */
 function copyablePath(t: ToolView): string | null {
-  const disk = t.installations.find((i: Installation) => i.where_.includes(':') || i.where_.startsWith('/'));
-  return (disk ?? t.installations[0])?.where_ ?? null;
+  const strip = (w: string): string => (w.startsWith('skills-dir:') ? w.slice('skills-dir:'.length) : w);
+  const named = ['npm-g', 'winget', 'skills-dir'];
+  const disk = t.installations.find(
+    (i: Installation) => !named.includes(i.where_) && (i.where_.includes(':') || i.where_.startsWith('/')),
+  );
+  const pick = disk ?? t.installations[0];
+  return pick ? strip(pick.where_) : null;
 }
 
 /**
@@ -580,7 +589,7 @@ function rowHTML(t: ToolView): string {
       : `<button class="lk" disabled title="no upstream repo">↗</button>`,
     `<button class="lk" data-lk="readme" title="README (detail tab)">▤</button>`,
     `<button class="lk" data-lk="copy" title="Copy path">⧉</button>`,
-    `<button class="lk" data-lk="ide" title="Open in IDE — placeholder">◧</button>`,
+    `<button class="lk" data-lk="open" title="Open in Windows — folder, or the default app for the file">◧</button>`,
   ].join('');
   const chips = stateChips(t)
     .map((c) => `<span class="chip ${c.cls}">${esc(c.label)}</span>`)
@@ -813,7 +822,9 @@ export async function refresh(): Promise<void> {
   // failure here must never take the scan report down with it.
   void (async () => {
     try {
-      const r = await refreshUpstream(25);
+      // No limit: a 25-row cap silently left the rest of the shelf showing a
+      // stale "—" upstream, which reads as "no update" rather than "not checked".
+      const r = await refreshUpstream();
       await loadTools(); // pick up fresh update badges
       const updates = state.tools.filter(hasUpdate).length;
       const rateLimited = r.errors.some((x) => /rate limit/i.test(x));
@@ -821,6 +832,16 @@ export async function refresh(): Promise<void> {
         `upstream: checked ${r.checked} · ${updates} update(s) on the shelf` +
           (r.errors.length > 0 ? ` · ${r.errors.length} error(s)${rateLimited ? ' (rate-limited)' : ''}` : ''),
       );
+      // The per-row Auto update toggle only means something if something acts
+      // on it. This is that something — it runs after the check, not before.
+      if (updates > 0) {
+        const sweep = await runAutoUpdate();
+        const applied = sweep.data?.applied ?? [];
+        if (applied.length > 0 || (sweep.data?.failed.length ?? 0) > 0) {
+          await loadTools();
+          toast(sweep.message);
+        }
+      }
     } catch (e) {
       errToast(e);
     }
@@ -886,7 +907,19 @@ export function menuItems(t: ToolView): Array<{ act: string; label: string; hint
   const retired = t.verdict === 'retired';
   const running = t.observations?.trial_running === 1;
   const updatable = t.kind === 'repo' || t.kind === 'global-cli';
+  const onDisk = (t.installations ?? []).some(
+    (i) => i.present === 1 && !['npm-g', 'winget', 'skills-dir'].includes(i.where_),
+  );
   return [
+    {
+      // A tool with no checkout cannot be planned from — clone it into a
+      // container first. Offered ONLY in that case, so the menu never shows two
+      // ways to start the same thing.
+      act: 'clone',
+      label: 'Clone into container…',
+      hint: onDisk ? 'already checked out on disk' : 'no host writes',
+      on: !onDisk && !running && !retired,
+    },
     {
       act: 'try',
       label: running ? 'Trial running' : 'Try in Docker…',
@@ -908,6 +941,9 @@ export function menuItems(t: ToolView): Array<{ act: string; label: string; hint
 
 export function runAction(act: string, t: ToolView): void {
   switch (act) {
+    case 'clone':
+      void cloneFlow(t);
+      return;
     case 'try':
       void tryFlow(t);
       return;
@@ -999,8 +1035,15 @@ async function linkAction(kind: string, t: ToolView): Promise<void> {
     }
     return;
   }
-  if (kind === 'ide') {
-    toast('Open in IDE — placeholder, ships in a later phase');
+  if (kind === 'open') {
+    // No IDE detection: Windows already knows what opens a folder or a file,
+    // and will ask if it does not.
+    try {
+      const res = await openToolPath(t.id);
+      toast(res.message);
+    } catch (e) {
+      errToast(e);
+    }
   }
 }
 

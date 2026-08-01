@@ -16,6 +16,9 @@ import type { TrialPlan, UpdatePreview } from '../../core/preview.js';
 import type { TeardownReport, TrialLogs, TrialRun } from '../../core/trial.js';
 import type { UpdateResult } from '../../core/update.js';
 import type { RegistrarResult, TargetId, TargetStatus } from '../../core/registrar.js';
+import type { ReadmeDoc } from '../../core/readme.js';
+import type { SandboxResult } from '../../core/sandbox.js';
+import type { AutoUpdateSweep } from '../../core/ops.js';
 
 let token = '';
 
@@ -186,8 +189,14 @@ export interface UpstreamRefreshData {
   errors: string[];
 }
 
-export async function refreshUpstream(limit = 25): Promise<UpstreamRefreshData> {
-  const body = await reqOp<UpstreamRefreshData>('POST', '/api/upstream/refresh', { limit });
+/** No limit = check every github repo on the shelf. A partial check is worse
+ *  than a slow one: an unchecked row shows the same "—" as a checked one. */
+export async function refreshUpstream(limit?: number): Promise<UpstreamRefreshData> {
+  const body = await reqOp<UpstreamRefreshData>(
+    'POST',
+    '/api/upstream/refresh',
+    limit === undefined ? {} : { limit },
+  );
   if (!body.ok) throw new Error(body.message);
   return body.data ?? { checked: 0, errors: [] };
 }
@@ -203,9 +212,38 @@ export async function getPreviewUpdate(id: number): Promise<Op<UpdatePreview>> {
   return reqOp<UpdatePreview>('GET', `/api/tools/${id}/preview-update`);
 }
 
+/** Same preview, but the server may run `git fetch` first. Only call it after
+ *  the user has agreed to that — hence POST, not GET. */
+export async function getPreviewUpdateFetching(id: number): Promise<Op<UpdatePreview>> {
+  return reqOp<UpdatePreview>('POST', `/api/tools/${id}/preview-update`, {});
+}
+
+export async function getReadme(id: number): Promise<Op<ReadmeDoc>> {
+  return reqOp<ReadmeDoc>('GET', `/api/tools/${id}/readme`);
+}
+
+/** Open the tool's folder/file with the OS default handler. */
+export async function openToolPath(id: number): Promise<Op<{ path: string; opener: string }>> {
+  return reqOp<{ path: string; opener: string }>('POST', `/api/tools/${id}/open`, {});
+}
+
+/** Repoint a row at the right upstream repo. */
+export async function setUpstream(id: number, url: string): Promise<Op<ToolView>> {
+  return reqOp<ToolView>('POST', `/api/tools/${id}/upstream`, { url });
+}
+
+export async function runAutoUpdate(): Promise<Op<AutoUpdateSweep>> {
+  return reqOp<AutoUpdateSweep>('POST', '/api/auto-update/run', {});
+}
+
 /** confirm:true means the user has SEEN the plan. Never send it blind. */
 export async function tryTool(id: number, confirm: boolean): Promise<Op<TrialRun>> {
   return reqOp<TrialRun>('POST', `/api/tools/${id}/try`, { confirm });
+}
+
+/** Clone into a container-only checkout (named volume + idle container). */
+export async function cloneTool(id: number): Promise<Op<SandboxResult>> {
+  return reqOp<SandboxResult>('POST', `/api/tools/${id}/clone`, {});
 }
 
 export async function tearDownTool(id: number): Promise<Op<TeardownReport>> {

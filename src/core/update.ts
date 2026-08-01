@@ -28,6 +28,7 @@ import {
   now,
   selectInstallations,
   selectTool,
+  upsertObservations,
   withTransaction,
 } from './db.js';
 import { previewUpdate, type UpdatePreview } from './preview.js';
@@ -290,6 +291,11 @@ function journalUpdate(
       db.prepare('UPDATE installations SET version_local = ?, last_seen_at = ? WHERE id = ?')
         .run(after, now(), installId);
     }
+    // The update landed, so the pending-update observation is stale. Leaving it
+    // set kept the amber "update" chip on a row that had just updated itself —
+    // version_upstream stays (it is still what upstream published), but this row
+    // is no longer behind it. The next real check re-derives both.
+    upsertObservations(db, toolId, { update_available: 0 });
     addEvent(db, toolId, `updated ${before ?? 'unknown'} -> ${after ?? 'unknown'}`);
     if (breaking.length > 0) {
       addEvent(db, toolId, `changelog flags possible breaking changes — ${breaking.join('; ')}`);

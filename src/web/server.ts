@@ -28,6 +28,11 @@ import {
   unregisterMcpOp,
   detectTargetsOp,
   browseCatalogsOp,
+  readmeOp,
+  openToolPathOp,
+  setUpstreamOp,
+  autoUpdateSweepOp,
+  cloneIntoSandboxOp,
   type SearchQuery,
   type TrackInput,
 } from '../core/ops.js';
@@ -400,6 +405,34 @@ export async function createOsmServer(
         sendJson(res, 200, previewUpdateOp(db, id));
         return;
       }
+      // GET /api/tools/:id/readme — fetched live from GitHub (or the checkout)
+      if (method === 'GET' && id !== undefined && segments[3] === 'readme' && segments.length === 4) {
+        sendJson(res, 200, await readmeOp(db, id));
+        return;
+      }
+      // POST /api/tools/:id/preview-update — same preview, but allowed to run
+      // `git fetch` so ancestry can actually be verified. MUTATING route shape
+      // (token + Origin enforced) because it writes to the object store.
+      if (method === 'POST' && id !== undefined && segments[3] === 'preview-update' && segments.length === 4) {
+        await parseJsonBody(req);
+        sendJson(res, 200, previewUpdateOp(db, id, { fetchRemote: true }));
+        return;
+      }
+      // POST /api/tools/:id/open — hand the path to the OS default handler
+      if (method === 'POST' && id !== undefined && segments[3] === 'open' && segments.length === 4) {
+        await parseJsonBody(req);
+        sendJson(res, 200, openToolPathOp(db, id));
+        return;
+      }
+      // POST /api/tools/:id/upstream — correct the row's upstream repo by hand
+      if (method === 'POST' && id !== undefined && segments[3] === 'upstream' && segments.length === 4) {
+        const body = await parseJsonBody(req);
+        if (typeof body.url !== 'string' || body.url.trim() === '') {
+          throw new HttpError(400, 'url is required');
+        }
+        sendJson(res, 200, setUpstreamOp(db, id, body.url));
+        return;
+      }
       // GET /api/tools/:id/plan-trial — read-only docker-run plan (never executed)
       if (method === 'GET' && id !== undefined && segments[3] === 'plan-trial' && segments.length === 4) {
         sendJson(res, 200, planTrialOp(db, id));
@@ -466,6 +499,13 @@ export async function createOsmServer(
       if (method === 'POST' && id !== undefined && segments[3] === 'try' && segments.length === 4) {
         const body = await parseJsonBody(req);
         sendJson(res, 200, await tryItOp(db, id, { confirm: boolField(body, 'confirm') }));
+        return;
+      }
+      // POST /api/tools/:id/clone { fullHistory? } — clone into a container,
+      // never onto the host disk
+      if (method === 'POST' && id !== undefined && segments[3] === 'clone' && segments.length === 4) {
+        const body = await parseJsonBody(req);
+        sendJson(res, 200, await cloneIntoSandboxOp(db, id, { fullHistory: boolField(body, 'fullHistory') }));
         return;
       }
       // POST /api/tools/:id/teardown — removes only OSM-created resources
@@ -599,6 +639,13 @@ export async function createOsmServer(
         limit = body.limit;
       }
       sendJson(res, 200, await refreshAllUpstreamOp(db, limit));
+      return;
+    }
+
+    // POST /api/auto-update/run — apply updates to rows that opted in
+    if (method === 'POST' && resource === 'auto-update' && segments[2] === 'run' && segments.length === 3) {
+      await parseJsonBody(req);
+      sendJson(res, 200, await autoUpdateSweepOp(db));
       return;
     }
 

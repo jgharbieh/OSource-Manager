@@ -121,13 +121,13 @@ interface Cmd {
   error: string | null;
 }
 
-function dockerBinFrom(opts: { dockerBin?: string }): string {
+export function dockerBinFrom(opts: { dockerBin?: string }): string {
   // docker ships as docker.exe on Windows, which execFile resolves from PATH
   // without a shell. No .cmd shim is involved (unlike claude/codex).
   return opts.dockerBin ?? process.env.OSM_DOCKER_BIN ?? 'docker';
 }
 
-async function docker(
+export async function docker(
   bin: string,
   args: string[],
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -153,15 +153,15 @@ async function docker(
 }
 
 /** Daemon reachable? Covers both "docker not installed" and "daemon down". */
-async function dockerAvailable(bin: string): Promise<boolean> {
+export async function dockerAvailable(bin: string): Promise<boolean> {
   const res = await docker(bin, ['version', '--format', '{{.Server.Version}}'], 20_000);
   return res.ok && res.stdout.trim() !== '';
 }
 
-const DOCKER_UNAVAILABLE =
+export const DOCKER_UNAVAILABLE =
   'docker is not available (binary missing or daemon not running) — nothing was executed';
 
-function lines(stdout: string): string[] {
+export function lines(stdout: string): string[] {
   return stdout
     .split(/\r?\n/)
     .map(l => l.trim())
@@ -265,7 +265,7 @@ async function volumeTrialLabel(bin: string, name: string, timeoutMs: number): P
   return { ok: false, missing: false, label: '', error };
 }
 
-async function imageExists(bin: string, image: string): Promise<boolean> {
+export async function imageExists(bin: string, image: string): Promise<boolean> {
   const res = await docker(bin, ['image', 'inspect', image, '--format', '{{.Id}}']);
   return res.ok && res.stdout.trim() !== '';
 }
@@ -362,7 +362,7 @@ function splitArgv(argv: string[]): SplitArgv {
 }
 
 /** Docker container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*. */
-function containerNameFor(toolName: string): string {
+export function containerNameFor(toolName: string): string {
   const slug = toolName
     .toLowerCase()
     .replace(/[^a-z0-9_.-]+/g, '-')
@@ -764,7 +764,12 @@ export async function tearDown(
 
     // 1. Container: always removed.
     if (trial.container) {
-      const rm = await docker(bin, ['rm', '-f', trial.container], timeout);
+      // -v removes the container's ANONYMOUS volumes only — docker never applies
+      // it to named ones, so a shared named volume is still safe. Without it,
+      // any image declaring VOLUME (alpine/git declares /git) leaks one dangling
+      // anonymous volume per trial, and the label check below rightly refuses to
+      // remove it because OSM never created it by name.
+      const rm = await docker(bin, ['rm', '-f', '-v', trial.container], timeout);
       if (rm.ok) {
         removed.push(`container ${trial.container}`);
       } else if (/No such container/i.test(rm.error ?? '')) {
@@ -807,7 +812,15 @@ export async function tearDown(
       }
     }
     for (const vol of mounted) {
-      if (!ownedVolumes.includes(vol)) kept.push(`kept shared volume ${vol} (not created by OSM)`);
+      if (ownedVolumes.includes(vol)) continue;
+      // A 64-hex name is docker's own anonymous volume, created by this container
+      // because its image declares VOLUME. `docker rm -v` above took it with the
+      // container, so reporting it as "kept" would be a lie.
+      if (/^[0-9a-f]{64}$/.test(vol)) {
+        removed.push(`anonymous volume ${vol.slice(0, 12)}… (created by this container)`);
+        continue;
+      }
+      kept.push(`kept shared volume ${vol} (not created by OSM)`);
     }
 
     // 3. Image: ONLY if OSM pulled it. A shared base image is never deleted.
