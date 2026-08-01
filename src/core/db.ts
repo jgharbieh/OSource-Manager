@@ -6,6 +6,7 @@ import type {
   ToolKind,
   Verdict,
   Installation,
+  McpRegistration,
   Observations,
   Tag,
   Comment,
@@ -76,6 +77,17 @@ const MIGRATIONS = [
     kind TEXT CHECK(kind IN ('user','event')),
     body TEXT,
     created_at TEXT
+  )`,
+  // Registrar ownership. A tool is registered with an agent under its OWN name
+  // ('trello'), so the name cannot say who created the entry — this table does.
+  // unregister_mcp will only remove a (tool, target, server_name) triple that
+  // appears here, which is what keeps OSM off a third-party server.
+  `CREATE TABLE IF NOT EXISTS mcp_registrations (
+    tool_id INTEGER NOT NULL,
+    target TEXT NOT NULL,
+    server_name TEXT NOT NULL,
+    registered_at TEXT,
+    PRIMARY KEY (tool_id, target, server_name)
   )`,
   `CREATE TABLE IF NOT EXISTS trials (
     id INTEGER PRIMARY KEY,
@@ -181,6 +193,15 @@ function rowToComment(row: Row): Comment {
     kind: row.kind as Comment['kind'],
     body: row.body as string,
     created_at: row.created_at as string,
+  };
+}
+
+function rowToMcpRegistration(row: Row): McpRegistration {
+  return {
+    tool_id: row.tool_id as number,
+    target: row.target as string,
+    server_name: row.server_name as string,
+    registered_at: (row.registered_at ?? '') as string,
   };
 }
 
@@ -434,6 +455,41 @@ export function upsertObservations(
     `INSERT INTO observations (${cols}) VALUES (?, ${placeholders})
      ON CONFLICT(tool_id) DO UPDATE SET ${updates}`,
   ).run(toolId, ...keys.map(k => fields[k] ?? null));
+}
+
+// --- mcp registrations (registrar ownership) ---
+//
+// Written ONLY by src/core/registrar.ts, inside the same transaction as the
+// journal event for the same write, so an agent config can never be changed
+// without both the record and the event landing together.
+
+/** Remember that OSM put `serverName` into `target` for this tool. */
+export function recordMcpRegistration(db: Db, toolId: number, target: string, serverName: string): void {
+  // OR IGNORE: re-registering keeps the original registered_at.
+  db.prepare(
+    'INSERT OR IGNORE INTO mcp_registrations (tool_id, target, server_name, registered_at) VALUES (?, ?, ?, ?)',
+  ).run(toolId, target, serverName, now());
+}
+
+/** Forget a triple — the entry is gone from the agent, so OSM no longer owns it. */
+export function forgetMcpRegistration(db: Db, toolId: number, target: string, serverName: string): void {
+  db.prepare('DELETE FROM mcp_registrations WHERE tool_id = ? AND target = ? AND server_name = ?')
+    .run(toolId, target, serverName);
+}
+
+/** Did OSM register exactly this (tool, target, server_name)? The unregister gate. */
+export function isOsmRegistration(db: Db, toolId: number, target: string, serverName: string): boolean {
+  const row = db.prepare(
+    'SELECT 1 AS hit FROM mcp_registrations WHERE tool_id = ? AND target = ? AND server_name = ?',
+  ).get(toolId, target, serverName);
+  return row !== undefined;
+}
+
+/** Everything OSM registered for a tool, newest first. */
+export function selectMcpRegistrations(db: Db, toolId: number): McpRegistration[] {
+  return db.prepare(
+    'SELECT * FROM mcp_registrations WHERE tool_id = ? ORDER BY registered_at DESC, target',
+  ).all(toolId).map(rowToMcpRegistration);
 }
 
 // --- trials ---

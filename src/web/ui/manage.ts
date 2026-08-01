@@ -1,4 +1,5 @@
-// Manage view: funnel strip, filter pills, shelf table, add bar, refresh stamp.
+// Manage view: funnel strip, filter pills + inline filter box, the shelf table
+// (sortable columns, bulk selection, keyboard cursor), add bar, refresh stamp.
 import {
   addTag as apiAddTag,
   listTools,
@@ -6,13 +7,21 @@ import {
   refreshAll,
   refreshUpstream,
   removeTag as apiRemoveTag,
+  retireTool,
   searchTools,
   trackTool,
 } from './api.js';
 import { registerFlow, retireFlow, tearDownFlow, tryFlow, unregisterFlow, updateFlow } from './actions.js';
 import { state, handlers } from './state.js';
+import type { SortDir, SortKey } from './state.js';
 import { $, esc, errToast, fmtRel, fmtStamp, repoWebUrl, toast } from './util.js';
 import type { Installation, Tag, ToolView } from '../../core/types.js';
+
+/** querySelector that tolerates a not-yet-built node (unlike $, which throws). */
+function qs(sel: string): HTMLElement | null {
+  const el = document.querySelector(sel);
+  return el instanceof HTMLElement ? el : null;
+}
 
 /* ---------- derived helpers ---------- */
 
@@ -102,10 +111,121 @@ export function matchFilter(t: ToolView, fq: string): boolean {
   return true;
 }
 
+/** Human label for a filter value — used in the "nothing matched" copy. */
+function pillLabel(fq: string): string {
+  const known: Record<string, string> = {
+    all: 'All',
+    repo: 'repos',
+    fav: '★ Favorites',
+    never: 'no evidence',
+    upd: 'has update',
+    apps: 'apps (winget)',
+    sys: 'system',
+  };
+  return known[fq] ?? (fq.startsWith('tag:') ? fq.slice(4) : fq);
+}
+
 function tagClass(tag: Tag): string {
   if (tag.detected === 0) return 't-cust';
   const known: Record<string, string> = { mcp: 't-mcp', skill: 't-skill', app: 't-app', api: 't-api', mine: 't-mine' };
   return known[tag.tag] ?? 't-cust';
+}
+
+/* ---------- inline text filter ---------- */
+
+/** Every space-separated term must appear somewhere in the row's text. */
+function queryTerms(): string[] {
+  const q = state.query.trim().toLowerCase();
+  return q ? q.split(/\s+/) : [];
+}
+
+/** Searched surface = everything the row actually shows: its name, the note or
+ *  source under it, and its tags. The canonical key rides along because that is
+ *  what the ↗ link points at and how most tools are remembered. */
+function haystack(t: ToolView): string {
+  return [t.name, t.why_i_want_it ?? '', t.source ?? '', t.kind, t.canonical_key, t.tags.map((x) => x.tag).join(' ')]
+    .join(' ')
+    .toLowerCase();
+}
+
+function matchQuery(t: ToolView, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const h = haystack(t);
+  return terms.every((term) => h.includes(term));
+}
+
+/* ---------- sorting ---------- */
+
+interface Col {
+  key: SortKey | null;
+  label: string;
+  right?: boolean;
+  /** Direction a first click on this column applies. Dates and versions read
+   *  newest-first; text reads A→Z. */
+  defDir?: SortDir;
+}
+
+const COLS: Col[] = [
+  { key: null, label: '' }, // bulk checkbox
+  { key: 'name', label: 'Tool', defDir: 1 },
+  { key: null, label: 'Links' },
+  { key: 'state', label: 'State', defDir: 1 },
+  { key: 'version', label: 'Version', defDir: -1 },
+  { key: 'upstream', label: 'Upstream', defDir: -1 },
+  { key: 'seen', label: 'Last seen', defDir: -1 },
+  { key: null, label: 'Do', right: true },
+];
+
+/** Column count — every colspan and the detail panel's holder cell key off this. */
+const NCOLS = COLS.length;
+
+const VERDICT_RANK: Record<string, number> = { wanted: 0, trying: 1, kept: 2, retired: 3 };
+
+/** Sort value as a string; '' means "blank", which always sinks to the bottom. */
+function sortValue(t: ToolView, key: SortKey): string {
+  if (key === 'name') return t.name;
+  if (key === 'state') return String(VERDICT_RANK[t.verdict] ?? 9);
+  if (key === 'version') {
+    const v = localVersion(t);
+    return v === '—' ? '' : v;
+  }
+  if (key === 'upstream') return t.observations?.version_upstream ?? '';
+  return lastSeen(t) ?? '';
+}
+
+/** Natural compare: '1.10.0' sorts after '1.9.0', unlike a plain string compare. */
+function cmpNat(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function sortRows(rows: ToolView[]): ToolView[] {
+  const { sortKey, sortDir } = state;
+  return rows.sort((a, b) => {
+    // Favorites pin above the sort, in every column and both directions.
+    if (a.favorite !== b.favorite) return b.favorite - a.favorite;
+    const av = sortValue(a, sortKey);
+    const bv = sortValue(b, sortKey);
+    const ablank = av === '';
+    const bblank = bv === '';
+    // Blanks last regardless of direction — reversing a column should not
+    // bury every real value under a wall of '—'.
+    if (ablank !== bblank) return ablank ? 1 : -1;
+    if (!ablank) {
+      const c = cmpNat(av, bv);
+      if (c !== 0) return c * sortDir;
+    }
+    return cmpNat(a.name, b.name);
+  });
+}
+
+function setSort(key: SortKey): void {
+  if (state.sortKey === key) {
+    state.sortDir = state.sortDir === 1 ? -1 : 1;
+  } else {
+    state.sortKey = key;
+    state.sortDir = COLS.find((c) => c.key === key)?.defDir ?? 1;
+  }
+  renderRows();
 }
 
 /* ---------- funnel ---------- */
@@ -125,7 +245,22 @@ function renderFunnel(): void {
   set('fn-retired', count((t) => t.verdict === 'retired'));
 }
 
-/* ---------- filter pills ---------- */
+/* ---------- filter bar ---------- */
+
+/** The filter bar is built once so the text input keeps focus and caret across
+ *  re-renders; renderPills() only ever rewrites the #pills span inside it. */
+function buildFilterBar(): void {
+  const fbar = qs('#fbar');
+  if (!fbar) return;
+  fbar.innerHTML = `<span class="lbl">filters</span><span class="pills" id="pills"></span>
+    <span class="spacer"></span>
+    <span class="qwrap">
+      <input class="fld qfld" id="qfilter" placeholder="filter name, note, tag…" spellcheck="false" autocomplete="off" aria-label="Filter the shelf">
+      <button class="qx hidden" id="qclear" title="Clear (esc)" aria-label="Clear filter">✕</button>
+    </span>
+    <span class="qcount" id="qcount"></span>
+    <button class="btn gho" id="palbtn"><kbd>Ctrl</kbd><kbd>K</kbd> search</button>`;
+}
 
 export function renderPills(): void {
   const tools = state.tools;
@@ -156,11 +291,281 @@ export function renderPills(): void {
       return `<button class="pil${p.dim ? ' dim' : ''}${state.filter === p.fq ? ' on' : ''}" data-fq="${esc(p.fq)}">${esc(p.label)} <em>${p.count}</em></button>`;
     })
     .join('');
-  const fbar = $('#fbar');
-  fbar.innerHTML = `${html}<span class="spacer"></span><button class="btn gho" id="palbtn"><kbd>Ctrl</kbd><kbd>K</kbd> search</button>`;
+  const pillHost = qs('#pills');
+  if (pillHost) pillHost.innerHTML = html;
 }
 
-/* ---------- table ---------- */
+/* ---------- table head ---------- */
+
+function headRow(): HTMLElement | null {
+  const table = document.querySelector('#rows')?.closest('table') ?? null;
+  const tr = table?.querySelector('thead tr') ?? null;
+  return tr instanceof HTMLElement ? tr : null;
+}
+
+/** Header markup is owned here (not in index.html) because the bulk-select
+ *  column and the sort buttons have to stay in lockstep with COLS. */
+function buildHead(): void {
+  const tr = headRow();
+  if (!tr) return;
+  tr.innerHTML = COLS.map((c, i) => {
+    if (c.key === null) {
+      if (i === 0) {
+        return `<th class="selth"><input type="checkbox" id="selall" aria-label="Select all visible rows" title="Select every visible row"></th>`;
+      }
+      return `<th${c.right === true ? ' class="right"' : ''}>${esc(c.label)}</th>`;
+    }
+    return `<th class="sortth" data-col="${c.key}" aria-sort="none"><button class="sortbtn" data-sort="${c.key}" title="Sort by ${esc(c.label.toLowerCase())}">${esc(c.label)}<span class="sar"></span></button></th>`;
+  }).join('');
+}
+
+function syncHead(): void {
+  const tr = headRow();
+  if (!tr) return;
+  tr.querySelectorAll('th[data-col]').forEach((th) => {
+    if (!(th instanceof HTMLElement)) return;
+    const on = th.dataset.col === state.sortKey;
+    th.setAttribute('aria-sort', on ? (state.sortDir === 1 ? 'ascending' : 'descending') : 'none');
+    th.classList.toggle('on', on);
+    const sar = th.querySelector('.sar');
+    if (sar) sar.textContent = on ? (state.sortDir === 1 ? '▲' : '▼') : '';
+  });
+  const all = document.querySelector('#selall');
+  if (all instanceof HTMLInputElement) {
+    const n = visibleIds.filter((id) => state.selected.has(id)).length;
+    all.checked = visibleIds.length > 0 && n === visibleIds.length;
+    all.indeterminate = n > 0 && n < visibleIds.length;
+    all.disabled = visibleIds.length === 0;
+  }
+}
+
+/* ---------- bulk selection ---------- */
+
+/** Ids of the rows currently rendered, in render order. Shift-click ranges and
+ *  the j/k cursor both index into this. */
+let visibleIds: number[] = [];
+/** Last row clicked with a checkbox — the other end of a shift-click range. */
+let anchorIdx = -1;
+/** True while a bulk run is in flight; the bar's buttons go dead. */
+let bulkBusy = false;
+
+function selectedTools(): ToolView[] {
+  const order = new Map<number, number>();
+  visibleIds.forEach((id, i) => order.set(id, i));
+  return state.tools
+    .filter((t) => state.selected.has(t.id))
+    .sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9) || a.name.localeCompare(b.name));
+}
+
+function clearSelection(): void {
+  if (state.selected.size === 0) return;
+  state.selected.clear();
+  anchorIdx = -1;
+  renderRows();
+}
+
+function pruneSelection(): void {
+  const live = new Set(state.tools.map((t) => t.id));
+  for (const id of [...state.selected]) {
+    if (!live.has(id)) state.selected.delete(id);
+  }
+  if (state.cursorId !== null && !live.has(state.cursorId)) state.cursorId = null;
+}
+
+function toggleSelect(id: number, shift: boolean, want: boolean, refocus = false): void {
+  const idx = visibleIds.indexOf(id);
+  if (shift && anchorIdx >= 0 && idx >= 0) {
+    // Shift extends the range with the clicked row's new state, the way every
+    // file list does it — the anchor is the previous checkbox interaction.
+    const lo = Math.min(anchorIdx, idx);
+    const hi = Math.max(anchorIdx, idx);
+    for (let i = lo; i <= hi; i++) {
+      if (want) state.selected.add(visibleIds[i]);
+      else state.selected.delete(visibleIds[i]);
+    }
+  } else if (want) {
+    state.selected.add(id);
+  } else {
+    state.selected.delete(id);
+  }
+  if (idx >= 0) anchorIdx = idx;
+  state.cursorId = id;
+  renderRows();
+  // The tbody was just rewritten, so the checkbox that was clicked no longer
+  // exists; give focus back to its replacement or tabbing dies mid-list.
+  if (refocus) {
+    const box = document.querySelector(`#rows tr[data-id="${id}"] input[data-sel]`);
+    if (box instanceof HTMLInputElement) box.focus();
+  }
+}
+
+function ensureBulkBar(): void {
+  const tw = qs('#view-manage .tw');
+  if (!tw || document.querySelector('#bulkbar')) return;
+  const bb = document.createElement('div');
+  bb.id = 'bulkbar';
+  bb.className = 'bulkbar hidden';
+  tw.parentElement?.insertBefore(bb, tw);
+}
+
+function renderBulk(): void {
+  const bb = qs('#bulkbar');
+  if (!bb) return;
+  const n = state.selected.size;
+  bb.classList.toggle('hidden', n === 0);
+  if (n === 0) return;
+  const hidden = n - visibleIds.filter((id) => state.selected.has(id)).length;
+  const sel = selectedTools();
+  const allFav = sel.length > 0 && sel.every((t) => t.favorite === 1);
+  const dis = bulkBusy ? ' disabled' : '';
+  bb.innerHTML = `<span class="bn">${n} selected</span>
+    ${hidden > 0 ? `<span class="bhid">· ${hidden} hidden by the current filter (still included)</span>` : ''}
+    <span class="spacer"></span>
+    <button class="btn" data-bulk="tag"${dis}>Tag…</button>
+    <button class="btn" data-bulk="untag"${dis}>Untag…</button>
+    <button class="btn" data-bulk="fav"${dis}>${allFav ? '☆ Unfavorite' : '★ Favorite'}</button>
+    <button class="btn danger" data-bulk="retire"${dis}>Retire…</button>
+    <button class="btn gho" data-bulk="clear"${dis}>Clear</button>`;
+}
+
+/** Run a bulk op one row at a time, reporting progress as it goes. Sequential on
+ *  purpose: every mutation writes a journal event server-side, and a failure
+ *  halfway through must leave a legible trail rather than a race. */
+async function bulkApply(
+  verb: string,
+  tools: ToolView[],
+  fn: (t: ToolView) => Promise<void>,
+  clearAfter = false,
+): Promise<void> {
+  const total = tools.length;
+  if (total === 0) return;
+  bulkBusy = true;
+  renderBulk();
+  let done = 0;
+  const failed: string[] = [];
+  for (const t of tools) {
+    toast(`${verb} ${done + failed.length + 1}/${total} — ${t.name}`);
+    try {
+      await fn(t);
+      done++;
+    } catch (e) {
+      failed.push(`${t.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  bulkBusy = false;
+  if (clearAfter) {
+    state.selected.clear();
+    anchorIdx = -1;
+  }
+  toast(failed.length === 0 ? `${verb}: ${done}/${total} done` : `${verb}: ${done}/${total} done · ${failed.length} failed`);
+  if (failed.length > 0) {
+    window.alert(`${verb} — these did not go through:\n\n${failed.map((f) => `  • ${f}`).join('\n')}`);
+  }
+  await (handlers.reload?.() ?? loadTools());
+}
+
+async function bulkTag(): Promise<void> {
+  const sel = selectedTools();
+  const name = (window.prompt(`Add a tag to ${sel.length} selected tool(s):`) ?? '').trim();
+  if (!name) return;
+  const todo = sel.filter((t) => !t.tags.some((x) => x.tag === name));
+  if (todo.length === 0) {
+    toast(`every selected row already has "${name}"`);
+    return;
+  }
+  await bulkApply(`tagging "${name}"`, todo, async (t) => {
+    await apiAddTag(t.id, name);
+  });
+}
+
+async function bulkUntag(): Promise<void> {
+  const sel = selectedTools();
+  const counts = new Map<string, number>();
+  for (const t of sel) {
+    for (const x of t.tags) counts.set(x.tag, (counts.get(x.tag) ?? 0) + 1);
+  }
+  if (counts.size === 0) {
+    toast('none of the selected rows carries a tag');
+    return;
+  }
+  const list = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([tag, c]) => `  ${tag} (${c})`)
+    .join('\n');
+  const name = (window.prompt(`Remove which tag from ${sel.length} selected tool(s)?\n\ntags on the selection:\n${list}\n`) ?? '').trim();
+  if (!name) return;
+  const todo = sel.filter((t) => t.tags.some((x) => x.tag === name));
+  if (todo.length === 0) {
+    toast(`no selected row has "${name}"`);
+    return;
+  }
+  if (!window.confirm(`Remove the tag "${name}" from ${todo.length} tool(s)?`)) return;
+  await bulkApply(`untagging "${name}"`, todo, async (t) => {
+    await apiRemoveTag(t.id, name);
+  });
+}
+
+async function bulkFav(): Promise<void> {
+  const sel = selectedTools();
+  if (sel.length === 0) return;
+  const next = !sel.every((t) => t.favorite === 1);
+  const todo = sel.filter((t) => (t.favorite === 1) !== next);
+  if (todo.length === 0) return;
+  await bulkApply(next ? 'favoriting' : 'unfavoriting', todo, async (t) => {
+    await patchTool(t.id, { favorite: next });
+  });
+}
+
+async function bulkRetire(): Promise<void> {
+  const sel = selectedTools().filter((t) => t.verdict !== 'retired');
+  if (sel.length === 0) {
+    toast('every selected row is already retired');
+    return;
+  }
+  const reason = (window.prompt(`Retire ${sel.length} tool(s) — why? (required, kept forever, applied to all of them)`) ?? '').trim();
+  if (!reason) {
+    toast('Retire needs a reason — that is the whole point.');
+    return;
+  }
+  const preview = sel.slice(0, 12).map((t) => `  • ${t.name}`).join('\n') + (sel.length > 12 ? `\n  … and ${sel.length - 12} more` : '');
+  const serving = sel.filter((t) => (t.observations?.serving_count ?? 0) > 0).length;
+  const lines = [
+    `Retire ${sel.length} tool(s)?`,
+    '',
+    preview,
+    '',
+    `Reason: ${reason}`,
+    '',
+    'Rows and journals stay; the verdict becomes retired.',
+    serving > 0 ? `${serving} of these are still registered as MCP servers — unregister those from the row menu afterwards.` : '',
+  ].filter((l) => l !== '');
+  if (!window.confirm(lines.join('\n'))) return;
+  await bulkApply(
+    'retiring',
+    sel,
+    async (t) => {
+      await retireTool(t.id, reason);
+      if (state.selectedId === t.id) state.selectedId = null;
+    },
+    // Retired rows stay on the shelf, so drop them from the selection here —
+    // leaving them checked invites a second Retire… on the same rows.
+    true,
+  );
+}
+
+function runBulk(act: string): void {
+  if (bulkBusy) return;
+  if (act === 'clear') {
+    clearSelection();
+    return;
+  }
+  if (act === 'tag') void bulkTag();
+  else if (act === 'untag') void bulkUntag();
+  else if (act === 'fav') void bulkFav();
+  else if (act === 'retire') void bulkRetire();
+}
+
+/* ---------- table body ---------- */
 
 function rowHTML(t: ToolView): string {
   const fav = t.favorite === 1;
@@ -184,30 +589,127 @@ function rowHTML(t: ToolView): string {
   const upNew = hasUpdate(t);
   const seen = lastSeen(t);
   const sub = t.why_i_want_it ? esc(t.why_i_want_it) : esc(t.source ? `via ${t.source}` : t.kind);
-  return `<tr data-id="${t.id}"${state.selectedId === t.id ? ' class="sel"' : ''}>
+  const picked = state.selected.has(t.id);
+  const cls = [state.selectedId === t.id ? 'sel' : '', picked ? 'picked' : '', state.cursorId === t.id ? 'cur' : '']
+    .filter(Boolean)
+    .join(' ');
+  return `<tr data-id="${t.id}"${cls ? ` class="${cls}"` : ''}>
+    <td class="selcell"><input type="checkbox" data-sel${picked ? ' checked' : ''} aria-label="Select ${esc(t.name)}"></td>
     <td><span class="nm"><button class="fav${fav ? ' on' : ''}" data-fav aria-label="Favorite" aria-pressed="${fav}">${fav ? '★' : '☆'}</button>${esc(t.name)}<span class="tags">${tags}${tagAdd}</span><span class="sub">${sub}</span></span></td>
     <td><span class="linkrow">${links}</span></td>
     <td><span class="statecell">${chips}</span></td>
     <td class="m">${esc(localVersion(t))}</td>
     <td class="m${upNew ? ' new' : ''}">${esc(up)}${upNew ? ' ↑' : ''}</td>
     <td class="m${seen ? '' : ' never'}">${seen ? fmtRel(seen) : '—'}</td>
-    <td><span class="rowacts"><span class="menu"><button class="dd" data-menu>Actions ▾</button></span></span></td></tr>`;
+    <td class="right"><span class="rowacts"><span class="menu"><button class="dd" data-menu>Actions ▾</button></span></span></td></tr>`;
 }
 
-export function renderRows(): void {
+function msgRow(cls: string, html: string): string {
+  return `<tr class="msgrow"><td colspan="${NCOLS}" class="rowmsg ${cls}">${html}</td></tr>`;
+}
+
+/** Loading / failed / nothing-tracked / nothing-matched are four different
+ *  facts. Each gets its own copy and its own way out. */
+function emptyRow(): string {
+  if (state.phase === 'loading') {
+    return msgRow('load', `<span class="spin" aria-hidden="true"></span><b>Reading the shelf…</b><span class="sub2">Pulling tools, installations and observations from the local database.</span>`);
+  }
+  if (state.phase === 'error') {
+    return msgRow(
+      'err',
+      `<b>Could not load the shelf.</b><span class="sub2">${esc(state.loadError ?? 'unknown error')}</span><button class="btn" data-retry>Retry</button>`,
+    );
+  }
+  if (state.tools.length === 0) {
+    return msgRow(
+      'empty',
+      `<b>Nothing tracked yet.</b><span class="sub2">Paste a repo URL in the <b>Add</b> bar above and hit <b>Track</b> — or hit <b>↻</b> to scan this machine and import what is already here.</span>`,
+    );
+  }
+  const q = state.query.trim();
+  const filtered = state.filter !== 'all' || q !== '';
+  if (filtered) {
+    const parts = [q ? `“${esc(q)}”` : '', state.filter !== 'all' ? `the <b>${esc(pillLabel(state.filter))}</b> filter` : ''].filter(Boolean);
+    return msgRow(
+      'nomatch',
+      `<b>No rows match ${parts.join(' + ')}.</b><span class="sub2">${state.tools.length} tool(s) on the shelf.</span><button class="btn" data-clearfilters>Clear ${q && state.filter !== 'all' ? 'filter + text' : q ? 'text' : 'filter'}</button>`,
+    );
+  }
+  // 'all', no text, still nothing: everything discovered is default-hidden noise.
+  return msgRow(
+    'empty',
+    `<b>Everything found is winget/system noise.</b><span class="sub2">The <b>apps (winget)</b> and <b>system</b> pills bring those ${state.tools.length} row(s) back.</span>`,
+  );
+}
+
+/** Shown when the text filter matches rows the default view hides — otherwise
+ *  searching for a winget app looks like the shelf simply does not have it. */
+function hiddenHintRow(): string {
+  const terms = queryTerms();
+  if (terms.length === 0 || state.filter !== 'all') return '';
+  const n = state.tools.filter((t) => isNoiseByDefault(t) && matchQuery(t, terms)).length;
+  if (n === 0) return '';
+  return `<tr class="hintrow"><td colspan="${NCOLS}">${n} more match “${esc(state.query.trim())}” among the rows hidden by default —
+    <button class="pil dim" data-fq="apps">apps (winget)</button> <button class="pil dim" data-fq="sys">system</button></td></tr>`;
+}
+
+/** Stale-data banner: a failed reload keeps the last good rows on screen, so
+ *  say so out loud instead of pretending the table is current. */
+function errorBannerRow(): string {
+  if (state.phase !== 'error') return '';
+  return `<tr class="hintrow err"><td colspan="${NCOLS}"><b>Last load failed:</b> ${esc(state.loadError ?? '')} — these rows are the last good data. <button class="btn" data-retry>Retry</button></td></tr>`;
+}
+
+function visibleTools(): ToolView[] {
   // The default ('all') view hides OS/vendor noise tagged 'system'; the
   // dedicated 'system' pill (fq 'sys') brings those rows back. Funnel and
   // pill counts stay honest — they always cover every row.
+  const terms = queryTerms();
   const rows = state.tools.filter(
-    (t) => matchFilter(t, state.filter) && (state.filter !== 'all' || !isNoiseByDefault(t)),
+    (t) =>
+      matchFilter(t, state.filter) &&
+      (state.filter !== 'all' || !isNoiseByDefault(t)) &&
+      matchQuery(t, terms),
   );
-  // favorites pinned to the top, then name
-  rows.sort((a, b) => b.favorite - a.favorite || a.name.localeCompare(b.name));
-  parkDetail(); // rescue #det before the tbody wipe destroys it
-  $('#rows').innerHTML =
-    rows.map(rowHTML).join('') ||
-    `<tr><td colspan="7" class="rowmsg">${state.tools.length === 0 ? 'Nothing tracked yet — paste a repo URL above and hit Track.' : 'No rows match this filter.'}</td></tr>`;
+  return sortRows(rows);
+}
+
+/**
+ * The ONLY place that writes #rows.
+ *
+ * parkDetail() is baked in on purpose: the detail panel is re-parented into a
+ * <tr>, so any tbody write that skips the rescue deletes the element itself and
+ * kills the detail view for the rest of the session. Making that impossible to
+ * forget is worth one extra function.
+ */
+function writeRows(html: string): void {
+  parkDetail();
+  $('#rows').innerHTML = html;
+}
+
+export function renderRows(): void {
+  const rows = visibleTools();
+  visibleIds = rows.map((t) => t.id);
+  if (state.cursorId !== null && !visibleIds.includes(state.cursorId)) state.cursorId = null;
+  syncHead();
+  renderBulk();
+  const qc = qs('#qcount');
+  if (qc) qc.textContent = state.query.trim() ? `${rows.length}/${state.tools.length}` : '';
+  const qx = qs('#qclear');
+  if (qx) qx.classList.toggle('hidden', state.query === '');
+  // The hidden-match hint is appended in BOTH cases on purpose: "no rows match
+  // microsoft" while 40 winget rows quietly match it is the exact moment the
+  // user needs to be told the default view is hiding things.
+  const body = rows.length > 0 ? errorBannerRow() + rows.map(rowHTML).join('') : emptyRow();
+  writeRows(body + hiddenHintRow());
   mountDetail();
+}
+
+/** Cursor moves are class-only — no tbody rewrite, so holding j stays smooth. */
+function paintCursor(): void {
+  document.querySelectorAll('#rows tr[data-id]').forEach((tr) => {
+    if (tr instanceof HTMLElement) tr.classList.toggle('cur', tr.dataset.id === String(state.cursorId));
+  });
 }
 
 /** Where #det lives when it is not parented under a row. Captured once, because
@@ -243,7 +745,7 @@ function mountDetail(): void {
   const holder = document.createElement('tr');
   holder.className = 'detrow';
   const td = document.createElement('td');
-  td.colSpan = 7;
+  td.colSpan = NCOLS;
   td.appendChild(det);
   holder.appendChild(td);
   tr.after(holder);
@@ -269,9 +771,13 @@ export function renderAll(): void {
 
 export async function loadTools(): Promise<void> {
   state.loading = true;
+  state.phase = 'loading';
+  state.loadError = null;
   neverIds = null;
+  renderRows(); // paints the loading row while the shelf is still empty
   try {
     state.tools = await listTools();
+    state.phase = 'ready';
     if (state.selectedId !== null && !state.tools.some((t) => t.id === state.selectedId)) {
       state.selectedId = null;
     }
@@ -283,9 +789,12 @@ export async function loadTools(): Promise<void> {
       }
     }
   } catch (e) {
+    state.phase = 'error';
+    state.loadError = e instanceof Error ? e.message : String(e);
     errToast(e);
   }
   state.loading = false;
+  pruneSelection();
   renderAll();
 }
 
@@ -515,7 +1024,121 @@ async function trackFromBar(): Promise<void> {
   }
 }
 
+/* ---------- keyboard ---------- */
+
+function palOpen(): boolean {
+  const p = document.querySelector('#pal');
+  return p instanceof HTMLElement && !p.hidden;
+}
+
+/** True when a text field owns the keyboard. Checkboxes and buttons do not
+ *  count — clicking a row's checkbox must not kill j/k for the rest of the day. */
+function isTyping(): boolean {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true;
+  if (el instanceof HTMLInputElement) {
+    return !['checkbox', 'radio', 'button', 'submit', 'reset'].includes(el.type);
+  }
+  return false;
+}
+
+function manageVisible(): boolean {
+  const v = qs('#view-manage');
+  return v !== null && !v.classList.contains('hidden');
+}
+
+function cursorTool(): ToolView | null {
+  if (state.cursorId === null) return null;
+  return state.tools.find((t) => t.id === state.cursorId) ?? null;
+}
+
+function moveCursor(delta: number): void {
+  if (visibleIds.length === 0) return;
+  const cur = state.cursorId === null ? -1 : visibleIds.indexOf(state.cursorId);
+  const next =
+    cur < 0
+      ? delta > 0
+        ? 0
+        : visibleIds.length - 1
+      : Math.max(0, Math.min(visibleIds.length - 1, cur + delta));
+  state.cursorId = visibleIds[next];
+  paintCursor();
+  document.querySelector(`#rows tr[data-id="${state.cursorId}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+function focusQuery(): void {
+  const el = document.querySelector('#qfilter');
+  if (el instanceof HTMLInputElement) {
+    el.focus();
+    el.select();
+  }
+}
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    closeMenus();
+    if (palOpen()) return; // the palette owns its own Escape
+    if (isTyping()) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      return;
+    }
+    if (state.selectedId !== null) {
+      handlers.closeDetail?.();
+      return;
+    }
+    if (state.selected.size > 0) clearSelection();
+    return;
+  }
+  if (palOpen() || isTyping() || !manageVisible()) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // Ctrl+K et al belong elsewhere
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === 'j' || k === 'ArrowDown') {
+    e.preventDefault();
+    moveCursor(1);
+    return;
+  }
+  if (k === 'k' || k === 'ArrowUp') {
+    e.preventDefault();
+    moveCursor(-1);
+    return;
+  }
+  if (e.key === 'Enter') {
+    const t = cursorTool();
+    if (!t) return;
+    e.preventDefault();
+    if (state.selectedId === t.id) handlers.closeDetail?.();
+    else handlers.select?.(t.id);
+    return;
+  }
+  if (k === 'x') {
+    const t = cursorTool();
+    if (!t) return;
+    e.preventDefault();
+    toggleSelect(t.id, e.shiftKey, !state.selected.has(t.id));
+    return;
+  }
+  if (k === '/') {
+    e.preventDefault();
+    focusQuery();
+    return;
+  }
+  if (k === 'f') {
+    const t = cursorTool();
+    if (!t) return;
+    e.preventDefault();
+    void toggleFav(t);
+  }
+}
+
+/* ---------- wiring ---------- */
+
 export function initManage(): void {
+  buildFilterBar();
+  buildHead();
+  ensureBulkBar();
+
   // filter pills + palette button (fbar is re-rendered, so delegate on document)
   document.addEventListener('click', (e) => {
     const target = e.target as Element | null;
@@ -551,8 +1174,58 @@ export function initManage(): void {
     // clicks inside an open action menu are handled by the menu itself
     if (target.closest('.menu-pop')) return;
 
+    // --- chrome outside the tbody: sort headers, select-all, bulk bar ---
+    const sortBtn = target.closest('[data-sort]');
+    if (sortBtn && sortBtn instanceof HTMLElement && sortBtn.dataset.sort) {
+      setSort(sortBtn.dataset.sort as SortKey);
+      return;
+    }
+
+    const selAll = target.closest('#selall');
+    if (selAll && selAll instanceof HTMLInputElement) {
+      const want = selAll.checked;
+      for (const id of visibleIds) {
+        if (want) state.selected.add(id);
+        else state.selected.delete(id);
+      }
+      anchorIdx = -1;
+      renderRows();
+      return;
+    }
+
+    const bulk = target.closest('[data-bulk]');
+    if (bulk && bulk instanceof HTMLElement && bulk.dataset.bulk) {
+      if (!(bulk instanceof HTMLButtonElement) || !bulk.disabled) runBulk(bulk.dataset.bulk);
+      return;
+    }
+
+    const clearF = target.closest('[data-clearfilters]');
+    if (clearF) {
+      state.filter = 'all';
+      state.query = '';
+      const qi = document.querySelector('#qfilter');
+      if (qi instanceof HTMLInputElement) qi.value = '';
+      renderPills();
+      renderRows();
+      return;
+    }
+
+    const retry = target.closest('[data-retry]');
+    if (retry) {
+      void (handlers.reload?.() ?? loadTools());
+      return;
+    }
+
     const rows = target.closest('#rows');
     if (!rows) return;
+
+    const sel = target.closest('[data-sel]');
+    if (sel && sel instanceof HTMLInputElement) {
+      const t = toolFromRow(sel);
+      // .checked is already the post-click value; renderRows repaints from state.
+      if (t) toggleSelect(t.id, (e as MouseEvent).shiftKey, sel.checked, true);
+      return;
+    }
 
     const fav = target.closest('[data-fav]');
     if (fav) {
@@ -597,18 +1270,48 @@ export function initManage(): void {
       // data-id — toolFromRow returns null and the click is correctly ignored.
       const t = toolFromRow(tr);
       if (t) {
+        state.cursorId = t.id;
         if (state.selectedId === t.id) handlers.closeDetail?.();
         else handlers.select?.(t.id);
       }
     }
   });
 
+  // Inline text filter. The bar is built once precisely so this input survives
+  // every re-render with its focus and caret intact.
+  const qi = document.querySelector('#qfilter');
+  if (qi instanceof HTMLInputElement) {
+    qi.addEventListener('input', () => {
+      state.query = qi.value;
+      renderRows();
+    });
+    qi.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation(); // this Escape clears the box, it does not close the panel
+        if (qi.value === '') {
+          qi.blur();
+          return;
+        }
+        qi.value = '';
+        state.query = '';
+        renderRows();
+      }
+    });
+  }
+  const qx = document.querySelector('#qclear');
+  qx?.addEventListener('click', () => {
+    state.query = '';
+    if (qi instanceof HTMLInputElement) {
+      qi.value = '';
+      qi.focus();
+    }
+    renderRows();
+  });
+
   // A viewport-anchored menu must not outlive the position it was measured at.
   window.addEventListener('scroll', closeMenus, true);
   window.addEventListener('resize', closeMenus);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeMenus();
-  });
+  document.addEventListener('keydown', onKeydown);
 
   $('#trackbtn').addEventListener('click', () => void trackFromBar());
   ($('#addurl') as HTMLInputElement).addEventListener('keydown', (e) => {

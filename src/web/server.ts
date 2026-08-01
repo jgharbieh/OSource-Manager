@@ -27,10 +27,12 @@ import {
   registerMcpOp,
   unregisterMcpOp,
   detectTargetsOp,
+  browseCatalogsOp,
   type SearchQuery,
   type TrackInput,
 } from '../core/ops.js';
 import { ALL_TARGETS, type McpServerSpec, type RegisterOpts, type TargetId } from '../core/registrar.js';
+import { ALL_CATALOG_SOURCES, type CatalogQuery, type CatalogSource } from '../core/catalog.js';
 
 export interface ServerHandle {
   server: http.Server;
@@ -514,6 +516,43 @@ export async function createOsmServer(
     // GET /api/mcp/targets — which agents exist here (read-only detection)
     if (method === 'GET' && resource === 'mcp' && segments[2] === 'targets' && segments.length === 3) {
       sendJson(res, 200, detectTargetsOp());
+      return;
+    }
+
+    // --- Browse (other people's shelves) ---
+    // GET /api/catalog?sources=docker,github&q=&limit= — LIVE public catalogs.
+    // Read-only route shape (no token, same as /upstream and /plan-trial): the
+    // op writes nothing, and PLAN.md decision #10 forbids mirroring a catalog
+    // into the DB. `sources` defaults to whatever Settings has enabled.
+    if (method === 'GET' && resource === 'catalog' && segments.length === 2) {
+      const query: CatalogQuery = {};
+      const sourcesRaw = url.searchParams.get('sources');
+      if (sourcesRaw !== null && sourcesRaw.trim() !== '') {
+        const wanted = sourcesRaw.split(',').map(s => s.trim()).filter(s => s !== '');
+        for (const s of wanted) {
+          if (!(ALL_CATALOG_SOURCES as readonly string[]).includes(s)) {
+            throw new HttpError(
+              400,
+              `unknown catalog source ${JSON.stringify(s)} — expected one of: ${ALL_CATALOG_SOURCES.join(', ')}`,
+            );
+          }
+        }
+        query.sources = wanted as CatalogSource[];
+      } else {
+        query.sources = ALL_CATALOG_SOURCES.filter(s => currentSettings.catalogs[s]);
+      }
+      const text = url.searchParams.get('q');
+      if (text !== null && text.trim() !== '') query.q = text;
+      const limitRaw = url.searchParams.get('limit');
+      if (limitRaw !== null) {
+        const n = Number(limitRaw);
+        if (!Number.isInteger(n) || n < 1 || n > 100) {
+          throw new HttpError(400, 'limit must be an integer 1-100');
+        }
+        query.limit = n;
+      }
+      // Every source disabled in Settings is an empty page, not an error.
+      sendJson(res, 200, await browseCatalogsOp(db, query));
       return;
     }
 

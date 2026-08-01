@@ -9,11 +9,15 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
-import type { OpResult } from './types.js';
+import type { McpRegistration, OpResult } from './types.js';
 import {
   type Db,
   addEvent,
+  forgetMcpRegistration,
+  isOsmRegistration,
+  recordMcpRegistration,
   selectInstallations,
+  selectMcpRegistrations,
   selectTool,
   selectTools,
   upsertObservations,
@@ -37,6 +41,10 @@ import {
  * Hard rules held here:
  * - Reversible: register_mcp and unregister_mcp are inverses. Retire can call the
  *   inverse instead of orphaning entries in every agent config.
+ * - A tool is registered under ITS OWN name (`trello`), never a namespaced one.
+ *   Ownership of an entry is therefore a DATABASE fact (mcp_registrations),
+ *   recorded when OSM writes and required before OSM removes — a caller cannot
+ *   talk OSM into deleting a server it did not create by naming it.
  * - dryRun executes NOTHING and still returns a unified diff of what would change.
  * - Any file OSM's write path touches is copied to ~/.osource/backups/<ts>-<target>-<file>
  *   BEFORE the write, and restored if verification fails.
@@ -409,36 +417,56 @@ export interface HttpServerSpec {
 
 export type McpServerSpec = StdioServerSpec | HttpServerSpec;
 
-/** Deterministic MCP server name for a tool. The `osm-` prefix is what makes
- *  OSM's own entries identifiable, so "unregister all" is implementable and
- *  OSM never touches a server it did not create. */
+/**
+ * Deterministic MCP server name for a tool: the tool's OWN name, slugified.
+ *
+ * No `osm-` prefix. The point of the registrar is to serve the user's tracked
+ * tools to their agents under the names they actually use — `trello`,
+ * `officemcp`, `playwright`. Prefixing would surface them in Claude and Codex
+ * as `osm-trello`, which is not what anyone asked for.
+ *
+ * Ownership is therefore NOT encoded in the name; it lives in the
+ * `mcp_registrations` table (see registerMcp / unregisterMcp below).
+ *
+ * The output always satisfies SERVER_NAME_RE.
+ */
 export function serverNameFor(toolName: string): string {
   const slug = toolName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `osm-${slug === '' ? 'tool' : slug}`;
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '');
+  return slug === '' ? 'osm-tool' : slug;
 }
 
 /**
- * The shape serverNameFor() produces, enforced as a boundary check.
+ * Charset gate for a server name. Strict, and about characters only.
  *
- * `opts.serverName` arrives verbatim from an HTTP body and from MCP tool input.
- * Without this gate a single `{"serverName":"notion"}` made unregisterMcp run
- * `claude mcp remove notion -s user` against the real ~/.claude.json and delete
- * a third-party server OSM never created. Both registerMcp and unregisterMcp
- * refuse anything that is not an OSM-owned name, BEFORE any argv is built.
+ * `opts.serverName` arrives verbatim from an HTTP body and from MCP tool input,
+ * and the value lands in two dangerous places: a child-process argv element and
+ * a key inside another program's config file. So the name is confined to
+ * `[a-z0-9._-]` starting on a letter or a digit — no spaces, quotes,
+ * backslashes, shell metacharacters, path separators, `@`, `:` or `..`, and no
+ * leading `-` (which a CLI would read as a flag). 64 characters max.
+ *
+ * What this gate deliberately does NOT do is require a prefix. Refusing every
+ * name that is not `osm-*` refused every real registration, because a real
+ * registration is `trello`. Deciding WHICH names OSM may remove is a separate
+ * question, answered from the database — see requireOwnedForUnregister.
  */
-export const OSM_SERVER_NAME_RE = /^osm-[a-z0-9][a-z0-9-]*$/;
+export const SERVER_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
-export function isOsmServerName(name: string): boolean {
-  return OSM_SERVER_NAME_RE.test(name);
+export function isValidServerName(name: string): boolean {
+  return SERVER_NAME_RE.test(name);
 }
 
-function refuseForeignName(name: string, verb: 'register' | 'unregister'): string {
+function refuseBadName(name: string, verb: 'register' | 'unregister'): string {
   return (
-    `refused to ${verb} MCP server ${JSON.stringify(name)}: not an OSM-owned name ` +
-    `(must match ${OSM_SERVER_NAME_RE.source}). OSM only ever writes servers it created.`
+    `refused to ${verb} MCP server ${JSON.stringify(name)}: a server name must match ` +
+    `${SERVER_NAME_RE.source} — letters, digits, dot, underscore and dash, starting with a letter ` +
+    `or a digit, 64 characters max. Nothing that could be read as a flag, a path or a shell ` +
+    `metacharacter reaches an argv or a config key.`
   );
 }
 
@@ -945,6 +973,12 @@ export interface RegistrarResult {
   targets: TargetOutcome[];
   /** Every target diff, concatenated. */
   diff: string;
+  /**
+   * What OSM records having registered for this tool, AFTER this call. This is
+   * the ownership list unregister_mcp is allowed to act on — an entry missing
+   * from it is one OSM did not create and will not remove.
+   */
+  registrations: McpRegistration[];
 }
 
 export interface RegisterOpts {
@@ -952,7 +986,8 @@ export interface RegisterOpts {
   dryRun?: boolean;
   /** Override the derived launch command. */
   server?: McpServerSpec;
-  /** Override the derived `osm-<slug>` server name. */
+  /** Override the derived server name. Defaults to the tool's own slugified
+   *  name — see serverNameFor. Must match SERVER_NAME_RE. */
   serverName?: string;
   /** Docker MCP Toolkit profile id — enabling is profile-based, not per-server. */
   dockerProfile?: string;
@@ -993,10 +1028,22 @@ interface Applied {
   outcome: TargetOutcome;
   /** A journal line, when something actually changed. */
   event: string | null;
+  /**
+   * Ownership bookkeeping for mcp_registrations, committed by finish() in the
+   * same transaction as the event. 'record' = OSM now owns this entry and may
+   * remove it later; 'forget' = it is gone, so OSM no longer owns it. Absent on
+   * a dry run and on anything that did not reach the desired state.
+   */
+  own?: 'record' | 'forget';
 }
 
 /** One target, one desired state. Shared by register and unregister so the
- *  backup / verify / rollback path can never drift between them. */
+ *  backup / verify / rollback path can never drift between them.
+ *
+ *  `owned` says whether mcp_registrations already holds this (tool, target,
+ *  name) triple. It changes no behaviour on the register path — it only makes
+ *  the outcome say out loud when a write would replace an entry OSM did not
+ *  create, which is visible in the dry run the UI always performs first. */
 async function applyToTarget(
   target: TargetStatus,
   name: string,
@@ -1005,6 +1052,7 @@ async function applyToTarget(
   opts: RegisterOpts,
   env: NodeJS.ProcessEnv,
   verb: 'register' | 'unregister',
+  owned: boolean,
 ): Promise<Applied> {
   const base = { target: target.id, backup: null as string | null, commands: [] as string[][] };
 
@@ -1035,6 +1083,18 @@ async function applyToTarget(
   const plannedDiff = unifiedDiff(beforeText, wantText, `${label} (current)`, `${label} (planned)`);
   const fullArgv = plan.argv.map(a => [target.command as string, ...a]);
 
+  // Names are the user's own ('trello'), so a collision with a server the user
+  // set up by hand is possible. It is not refused — the tool the user tracks and
+  // the server they already run under that name are usually the same thing, and
+  // refusing would block the flow — but it is never silent: the note rides in
+  // the outcome message, the full before/after is in the diff, and the config is
+  // copied to ~/.osource/backups before anything is written.
+  const replacesForeign = verb === 'register' && before.found && !owned;
+  const foreignNote = replacesForeign
+    ? ` — NOTE: ${target.id} already has a server called ${name} that OSM has no record of creating; ` +
+      'this REPLACES it (the config is backed up first)'
+    : '';
+
   if (opts.dryRun === true) {
     return {
       event: null,
@@ -1045,7 +1105,7 @@ async function applyToTarget(
         message:
           plannedDiff === ''
             ? `${target.id}: already in the desired state — nothing would change`
-            : `${target.id}: would ${verb} ${name} (nothing executed)`,
+            : `${target.id}: would ${verb} ${name} (nothing executed)${foreignNote}`,
         diff: plannedDiff,
         commands: fullArgv,
       },
@@ -1055,6 +1115,12 @@ async function applyToTarget(
   if (entriesEqual(before.entry, want)) {
     return {
       event: null,
+      // Nothing was written, but the target IS in the state this call asked for,
+      // so the ownership record is brought in line with it: a register that finds
+      // its own entry already there stays removable, and an unregister that finds
+      // the entry already gone clears the stale row instead of leaving OSM
+      // claiming a server that no longer exists.
+      own: verb === 'register' ? 'record' : 'forget',
       outcome: {
         ...base,
         ok: true,
@@ -1127,11 +1193,14 @@ async function applyToTarget(
   );
   return {
     event: verb === 'register' ? `registered → ${target.id} (${name})` : `unregistered → ${target.id} (${name})`,
+    own: verb === 'register' ? 'record' : 'forget',
     outcome: {
       ...base,
       ok: true,
       status: verb === 'register' ? 'registered' : 'unregistered',
-      message: `${target.id}: ${verb === 'register' ? 'registered' : 'unregistered'} ${name}, verified via CLI read-back`,
+      message:
+        `${target.id}: ${verb === 'register' ? 'registered' : 'unregistered'} ${name}, ` +
+        `verified via CLI read-back${foreignNote}`,
       diff: observedDiff,
       backup: backupNote,
       commands: ran,
@@ -1150,9 +1219,17 @@ function finish(
 ): OpResult<RegistrarResult> {
   const outcomes = applied.map(a => a.outcome);
   const events = applied.map(a => a.event).filter((e): e is string => e !== null);
-  if (events.length > 0) {
+  const owns = applied.filter(a => a.own !== undefined);
+  // One transaction for both: the journal event and the ownership record for the
+  // same write land together or not at all, so OSM can never end up owning an
+  // entry it has no journal line for, nor the reverse.
+  if (events.length > 0 || owns.length > 0) {
     withTransaction(db, () => {
       for (const e of events) addEvent(db, toolId, e);
+      for (const a of owns) {
+        if (a.own === 'record') recordMcpRegistration(db, toolId, a.outcome.target, serverName);
+        else forgetMcpRegistration(db, toolId, a.outcome.target, serverName);
+      }
     });
   }
   const result: RegistrarResult = {
@@ -1164,6 +1241,7 @@ function finish(
       .map(o => o.diff)
       .filter(d => d !== '')
       .join('\n'),
+    registrations: selectMcpRegistrations(db, toolId),
   };
   const good = outcomes.filter(o => o.ok).length;
   const bad = outcomes.length - good;
@@ -1197,7 +1275,7 @@ export async function registerMcp(
       spec = derived.data;
     }
     const name = opts.serverName ?? serverNameFor(tool.name);
-    if (!isOsmServerName(name)) return fail(refuseForeignName(name, 'register'));
+    if (!isValidServerName(name)) return fail(refuseBadName(name, 'register'));
     const want = normalizeSpec(spec);
     const env = envFor(opts);
     const found = selectedTargets(targets, env);
@@ -1221,7 +1299,16 @@ export async function registerMcp(
         continue;
       }
       applied.push(
-        await applyToTarget(target, name, want, addArgvFor(id, name, spec, opts), opts, env, 'register'),
+        await applyToTarget(
+          target,
+          name,
+          want,
+          addArgvFor(id, name, spec, opts),
+          opts,
+          env,
+          'register',
+          isOsmRegistration(db, toolId, id, name),
+        ),
       );
     }
     const result = finish(db, toolId, name, spec, applied, opts, 'register');
@@ -1251,7 +1338,7 @@ export async function unregisterMcp(
     if (targets.length === 0) return fail('no targets given — unregistration is per-tool and explicit');
 
     const name = opts.serverName ?? serverNameFor(tool.name);
-    if (!isOsmServerName(name)) return fail(refuseForeignName(name, 'unregister'));
+    if (!isValidServerName(name)) return fail(refuseBadName(name, 'unregister'));
     const env = envFor(opts);
     const found = selectedTargets(targets, env);
 
@@ -1273,9 +1360,34 @@ export async function unregisterMcp(
         });
         continue;
       }
-      applied.push(
-        await applyToTarget(target, name, null, removeArgvFor(id, name, opts), opts, env, 'unregister'),
-      );
+      // THE ownership gate. Removal is the destructive half, and the name alone
+      // proves nothing now that names are the user's own, so OSM removes only a
+      // (tool, target, server_name) triple it recorded when it did the write.
+      // A caller passing {"serverName":"notion"} gets this refusal instead of
+      // `claude mcp remove notion -s user`.
+      //
+      // Checked only where a removal could actually run: an undetected target or
+      // one whose plan is already a refusal keeps its own, more specific message.
+      const plan = removeArgvFor(id, name, opts);
+      const removable = target.detected && target.can_register && !('refusal' in plan);
+      if (removable && !isOsmRegistration(db, toolId, id, name)) {
+        applied.push({
+          event: null,
+          outcome: {
+            target: id,
+            ok: false,
+            status: 'skipped',
+            message:
+              `${id}: refusing to remove ${JSON.stringify(name)} — OSM has no record of registering ` +
+              `it here for ${tool.name}. OSM only ever removes servers it created.`,
+            diff: '',
+            backup: null,
+            commands: [],
+          },
+        });
+        continue;
+      }
+      applied.push(await applyToTarget(target, name, null, plan, opts, env, 'unregister', true));
     }
     const result = finish(db, toolId, name, null, applied, opts, 'unregister');
     if (opts.dryRun !== true) await syncServingCount(db, toolId, opts);

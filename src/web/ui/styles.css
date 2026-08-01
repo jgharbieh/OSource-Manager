@@ -270,3 +270,81 @@ a.lk{text-decoration:none}
   line-height:1;padding:4px 6px;border-radius:4px;cursor:pointer}
 .detx:hover{background:var(--sunk);color:var(--ink)}
 .detrow .det-l{position:relative}
+
+/* ============ shelf as an app: sort · bulk · cursor · filter · states ============
+   Everything below is additive and lives last on purpose: several rules below
+   deliberately win the cascade against the base table styles above (same
+   specificity, later wins). Do not hoist them. */
+
+/* --- sortable column headers --- */
+th.sortth{padding:0}
+th.sortth .sortbtn{display:flex;align-items:center;gap:5px;width:100%;padding:8px 11px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink3);font-weight:600;cursor:pointer;white-space:nowrap}
+th.sortth:hover .sortbtn{color:var(--ink)}
+th.sortth.on .sortbtn{color:var(--accent)}
+th.sortth .sar{font-size:8px;line-height:1;width:8px;flex:none;color:var(--accent)}
+th.right,td.right{text-align:right}
+/* The bulk column costs the Do column ~30px; without this the Actions button
+   breaks across two lines and every row grows 14px taller. */
+.dd{white-space:nowrap}
+
+/* --- bulk selection column --- */
+th.selth,td.selcell{width:34px;padding-right:2px}
+th.selth input,td.selcell input{accent-color:var(--accent);cursor:pointer;margin:0;vertical-align:middle;width:14px;height:14px}
+th.selth input:disabled{cursor:not-allowed;opacity:.4}
+
+/* Row states compose: picked (bulk) · cur (keyboard) · sel (detail open).
+   Detail-open wins the background; the keyboard rail wins the left edge. */
+tbody tr.picked{background:var(--blue-soft)}
+tbody tr.cur{background:var(--sunk)}
+tbody tr.cur.picked{background:var(--blue-soft)}
+tbody tr.sel,tbody tr.sel.cur,tbody tr.sel.picked{background:var(--accent-soft)}
+tbody tr.cur > td:first-child{box-shadow:inset 3px 0 0 var(--ink)}
+tbody tr.sel.cur > td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+
+/* --- bulk action bar (injected by manage.ts above the table) --- */
+.bulkbar{display:flex;align-items:center;gap:7px;padding:8px 12px;flex-wrap:wrap;
+  background:var(--accent-soft);border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink)}
+.bulkbar.hidden{display:none}
+.bulkbar .bn{font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent);
+  font-variant-numeric:tabular-nums}
+.bulkbar .bhid{font-size:11.5px;color:var(--ink2)}
+.bulkbar .btn{background:var(--panel)}
+.bulkbar .btn.gho{background:transparent}
+
+/* --- inline text filter, beside the pills --- */
+.pills{display:contents}
+.qwrap{position:relative;display:inline-flex;align-items:center}
+.fbar .qfld{border:1px solid var(--line);border-radius:5px;padding:5px 22px 5px 9px;
+  font-family:var(--mono);font-size:11.5px;background:var(--sunk);color:var(--ink);
+  width:220px;min-width:120px;outline:0}
+.fbar .qfld:focus{border-color:var(--accent);background:var(--panel)}
+.fbar .qfld::placeholder{color:var(--ink3)}
+.qx{position:absolute;right:4px;width:15px;height:15px;border-radius:3px;display:grid;place-items:center;
+  font-size:9px;color:var(--ink3);background:none;border:0;cursor:pointer;line-height:1}
+.qx:hover{color:var(--accent);background:var(--sunk)}
+.qx.hidden{display:none}
+.qcount{font-family:var(--mono);font-size:10px;color:var(--ink3);font-variant-numeric:tabular-nums}
+
+/* --- empty / loading / error rows --- */
+tr.msgrow,tr.hintrow{cursor:default}
+tr.msgrow:hover,tr.hintrow:hover{background:transparent}
+tr.msgrow > td{border-bottom:0}
+.rowmsg b{color:var(--ink);font-weight:700}
+.rowmsg .sub2{display:block;color:var(--ink3);font-size:12.5px;margin-top:4px;max-width:74ch;line-height:1.5}
+.rowmsg .btn{margin-top:11px}
+.rowmsg.load{color:var(--ink2)}
+.rowmsg.err{box-shadow:inset 3px 0 0 var(--crit)}
+.rowmsg.err b{color:var(--crit)}
+.rowmsg.nomatch{box-shadow:inset 3px 0 0 var(--line)}
+.spin{display:inline-block;width:11px;height:11px;margin-right:8px;vertical-align:-1px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--accent);animation:osm-spin .7s linear infinite}
+@keyframes osm-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+
+/* --- inline notice rows inside the tbody (stale data, hidden matches) --- */
+tr.hintrow > td{background:var(--sunk);color:var(--ink2);font-size:12px;padding:8px 11px;line-height:1.6}
+tr.hintrow.err > td{background:var(--crit-soft);color:var(--ink)}
+tr.hintrow .btn{margin-left:6px}
+tr.hintrow .pil{margin:0 1px}

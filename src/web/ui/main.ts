@@ -5,6 +5,7 @@ import { $, errToast } from './util.js';
 import * as manage from './manage.js';
 import * as detail from './detail.js';
 import * as palette from './palette.js';
+import * as browseView from './browse.js';
 import * as settingsView from './settings.js';
 
 function wireViewTabs(): void {
@@ -34,6 +35,7 @@ async function boot(): Promise<void> {
   manage.initManage();
   detail.initDetail();
   palette.initPalette();
+  browseView.initBrowse();
   settingsView.initSettings();
   wireViewTabs();
 

@@ -71,6 +71,22 @@ export interface Trial {
   outcome: string | null;
 }
 
+/**
+ * One MCP server registration OSM actually performed.
+ *
+ * This is the ownership record. OSM's entries are NOT identifiable by their
+ * name — a tool is registered under its own name ('trello', not 'osm-trello'),
+ * which is the whole point — so what OSM may later remove is remembered here
+ * instead of being encoded in the name.
+ */
+export interface McpRegistration {
+  tool_id: number;
+  /** TargetId of the agent written to ('claude' | 'codex' | …). */
+  target: string;
+  server_name: string;
+  registered_at: string;
+}
+
 export interface Settings {
   scanDirs: string[];
   skillsDirs: string[];

@@ -42,6 +42,12 @@ import {
   type TargetStatus,
 } from './registrar.js';
 import {
+  searchCatalogs,
+  type CatalogOpts,
+  type CatalogQuery,
+  type CatalogResults,
+} from './catalog.js';
+import {
   aliasesForGitUrl,
   canonicalKeyForGitUrl,
   canonicalKeyForLocal,
@@ -505,5 +511,23 @@ export function detectTargetsOp(env?: NodeJS.ProcessEnv): OpResult<TargetStatus[
     return ok(`${targets.length} target(s) known, ${usable} registerable`, targets);
   } catch (err) {
     return fail(`detect_targets failed: ${String(err)}`);
+  }
+}
+
+/**
+ * Browse — query the PUBLIC catalogs live (PLAN.md locked decision #10:
+ * "queried live, never mirrored"). Read-only in the strictest sense: the only
+ * DB access is a shelf index used to flag `already_tracked`. Nothing is
+ * written, cached, or installed; adding a row is still trackTool's job.
+ */
+export async function browseCatalogsOp(
+  db: Db,
+  query: CatalogQuery = {},
+  opts: CatalogOpts = {},
+): Promise<OpResult<CatalogResults>> {
+  try {
+    return await searchCatalogs(db, query, opts);
+  } catch (err) {
+    return fail(`browse failed: ${String(err)}`);
   }
 }

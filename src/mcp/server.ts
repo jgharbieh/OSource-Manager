@@ -315,7 +315,12 @@ export const TOOLS: OsmToolDef[] = [
         tool_id: TOOL_ID_PROP,
         targets: TARGETS_PROP,
         dryRun: { type: 'boolean', description: 'Build the diff and the argv, execute nothing. Do this first.' },
-        serverName: { type: 'string', description: 'Override the derived osm-<slug> server name.' },
+        serverName: {
+          type: 'string',
+          description:
+            "Override the server name. Defaults to the tool's own slugified name (a tool called trello " +
+            'is served as "trello"). Letters, digits, dot, underscore and dash only.',
+        },
         dockerProfile: {
           type: 'string',
           description: 'Docker MCP Toolkit profile. Required for the docker target — enabling is profile-based.',
@@ -380,13 +385,19 @@ export const TOOLS: OsmToolDef[] = [
     description:
       "The inverse of register_mcp: remove this tool's MCP server from the chosen agents. Without this, " +
       'retiring a tool leaves an orphaned entry in every agent config. Same backup / verify-by-read-back / ' +
-      'rollback path as registration.',
+      'rollback path as registration. Only entries OSM itself registered are removable — a name OSM has ' +
+      'no record of writing is refused, so a third-party server can never be deleted through this tool.',
     inputSchema: {
       type: 'object',
       properties: {
         tool_id: TOOL_ID_PROP,
         targets: TARGETS_PROP,
-        serverName: { type: 'string', description: 'Override the derived osm-<slug> server name.' },
+        serverName: {
+          type: 'string',
+          description:
+            "Override the server name. Defaults to the tool's own slugified name. Must be a name OSM " +
+            'recorded registering for this tool, or the removal is refused.',
+        },
         dockerProfile: { type: 'string', description: 'Docker MCP Toolkit profile. Required for the docker target.' },
       },
       required: ['tool_id', 'targets'],
