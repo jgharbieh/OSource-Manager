@@ -213,7 +213,7 @@ const CASES: Case[] = [
     tool: 'try_it',
     args: { tool_id: 1 },
     http: { method: 'POST', path: '/api/tools/1/try', body: {} },
-    expect: /no present disk installation/,
+    expect: /not checked out on this machine/,
   },
   {
     tool: 'tear_down',
@@ -225,7 +225,7 @@ const CASES: Case[] = [
     tool: 'update',
     args: { tool_id: 1 },
     http: { method: 'POST', path: '/api/tools/1/update', body: {} },
-    expect: /no present disk installation/,
+    expect: /not checked out on this machine/,
   },
   {
     tool: 'retire',
@@ -510,7 +510,7 @@ test('tools/call runs the shared op and reports failures as isError, not excepti
     assert.equal(refused.isError, true);
     const refusedText = (refused.content as Array<{ type: string; text: string }>)[0].text;
     assert.match(refusedText, /^FAILED: /);
-    assert.match(refusedText, /no present disk installation/);
+    assert.match(refusedText, /not checked out on this machine/);
 
     const badArgs = await client.callTool({ name: 'comment', arguments: { tool_id: id } });
     assert.equal(badArgs.isError, true);

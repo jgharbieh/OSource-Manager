@@ -128,30 +128,53 @@ export async function cloneFlow(t: ToolView): Promise<void> {
   const dlg = openFlow(`Clone ${t.name} into a container`);
   try {
     const ans = await dlg.ask({
-      lead: 'The checkout goes into a Docker volume, not onto your disk — so an untried repo cannot silently become clutter.',
-      consequences: [
-        'a named volume is created and labelled osm.trial=<uid>, and git clone --depth 1 runs inside a container',
-        'nothing is written to this machine’s filesystem — there is no host path to clean up',
-        'the source container idles (sleep infinity); none of the repo’s own code is executed',
-        'Tear down removes the volume, the container, and the git image only if OSM pulled it',
+      lead: 'Untrusted code, held at arm\u2019s length: the checkout goes into a Docker volume, and no host path is ever mounted into the container.',
+      choices: [
+        {
+          id: 'inspect',
+          label: 'Inspect only \u2014 no network, nothing runs',
+          hint: 'clone and read it. --network none, source and rootfs read-only, nobody, all capabilities dropped. Safe for code nobody has audited.',
+          checked: true,
+        },
+        {
+          id: 'run',
+          label: 'Run \u2014 install its dependencies so the tool works',
+          hint: 'network ON and the repo\u2019s own install script EXECUTES. Still no host mount, still non-root, still cap-dropped. Choose this only when you actually intend to use the thing.',
+        },
       ],
-      confirmLabel: 'Clone it in Docker',
+      consequences: [
+        'git clone --depth 1 runs in a container; nothing is written to this machine\u2019s filesystem',
+        'no host path is mounted: your filesystem, SSH keys and .env files are not present in there',
+        'either way: runs as nobody, every Linux capability dropped, no-new-privileges, memory and process caps',
+        'Tear down removes the container, the volumes OSM created, and the image only if OSM pulled it',
+      ],
+      confirmLabel: 'Clone it',
     });
     if (!ans.confirmed) return;
+    const mode = ans.selected.includes('run') ? 'run' : 'inspect';
 
-    dlg.working('pulling the git image if needed, creating the volume, cloning…');
-    const res = await cloneTool(t.id);
+    dlg.working(
+      mode === 'run'
+        ? 'cloning, pulling the runtime image, then installing its dependencies inside the container\u2026'
+        : 'pulling the git image if needed, creating the volume, cloning\u2026',
+    );
+    const res = await cloneTool(t.id, mode);
     const d = res.data;
     const facts = d
       ? [
-          `volume:    ${d.volume}`,
+          `mode:      ${d.mode}${d.runtime ? ` (${d.runtime})` : ''}`,
+          `volume:    ${d.volume}${d.work_volume ? `  +  ${d.work_volume} (writable)` : ''}`,
           `container: ${d.container}`,
           `path:      ${d.path}  (inside the container)`,
-          `image:     ${d.image}${d.image_created_by_osm ? ' (pulled by OSM — teardown removes it)' : ' (already here — teardown keeps it)'}`,
+          `image:     ${d.image}${d.image_created_by_osm ? ' (pulled by OSM \u2014 teardown removes it)' : ' (already here \u2014 teardown keeps it)'}`,
           '',
           `open a shell:  ${d.exec_hint}`,
           '',
+          'isolation applied:',
+          ...d.isolation.map((x) => `  \u00b7 ${x}`),
+          '',
           d.entries.length > 0 ? `cloned files: ${d.entries.slice(0, 24).join('  ')}` : '(the clone reported no files)',
+          ...(d.install_output ? ['', 'dependency install:', d.install_output] : []),
         ].join('\n')
       : undefined;
     await dlg.report({ ok: res.ok, message: res.message, pre: facts });

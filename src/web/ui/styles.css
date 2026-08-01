@@ -400,3 +400,15 @@ tr.hintrow .pil{margin:0 1px}
 .mini{font:inherit;font-size:10.5px;letter-spacing:.02em;color:var(--ink3);background:var(--sunk);
   border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-left:6px;cursor:pointer;vertical-align:1px}
 .mini:hover{color:var(--accent);border-color:var(--accent)}
+
+/* --- locally-rendered markdown (core/markdown.ts) --- */
+/* A skill's frontmatter is its contract (name / description / mode), not stray
+   text before the body — so it gets its own block instead of a `---` paragraph. */
+.md-body .md-fm{display:grid;grid-template-columns:max-content 1fr;gap:3px 12px;margin:0 0 14px;
+  padding:10px 12px;background:var(--sunk);border:1px solid var(--line);border-radius:var(--r);font-size:12.5px}
+.md-body .md-fm dt{font-family:var(--mono);font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
+.md-body .md-fm dd{margin:0;color:var(--ink)}
+/* Local tables get their own scroll box (GitHub's wrapper element is absent). */
+.md-body .md-tw{max-width:100%;overflow-x:auto}
+.md-body pre[data-lang]::before{content:attr(data-lang);display:block;font-family:var(--mono);font-size:10px;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin-bottom:6px}

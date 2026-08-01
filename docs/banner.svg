@@ -1,0 +1,63 @@
+<svg width="1280" height="440" viewBox="0 0 1280 440" fill="none" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI',system-ui,-apple-system,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="0.55" stop-color="#12161f"/>
+      <stop offset="1" stop-color="#0a0e14"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f0883e"/>
+      <stop offset="1" stop-color="#e3623b"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f0883e"/>
+      <stop offset="1" stop-color="#f0883e" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f0883e" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#f0883e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="440" rx="16" fill="url(#bg)"/>
+  <ellipse cx="1030" cy="150" rx="420" ry="300" fill="url(#glow)"/>
+  <rect x="1" y="1" width="1278" height="438" rx="15" fill="none" stroke="#232a35" stroke-width="1.5"/>
+
+  <!-- kicker -->
+  <rect x="72" y="86" width="30" height="3" rx="1.5" fill="url(#accent)"/>
+  <text x="112" y="92" fill="#8b98a9" font-size="15" letter-spacing="4" font-weight="600">LOCAL-FIRST OSS MANAGER</text>
+
+  <!-- wordmark -->
+  <text x="70" y="188" fill="#f4f6fb" font-size="82" font-weight="800" letter-spacing="-2">OSource<tspan fill="url(#accent)">-</tspan>Manager</text>
+
+  <!-- tagline -->
+  <text x="72" y="238" fill="#c2ccd8" font-size="26" font-weight="500">See it &#183; try it &#183; keep it or kill it &#8212; with the verdict remembered.</text>
+  <text x="72" y="276" fill="#8b98a9" font-size="17">Every repo, global CLI, MCP server and skill on your machine, in one place, with a journal.</text>
+
+  <!-- funnel: the product's spine -->
+  <g transform="translate(72,322)" font-size="14" font-weight="600">
+    <rect x="0" y="0" width="132" height="40" rx="8" fill="#161b24" stroke="#2a3340"/>
+    <text x="66" y="25" fill="#c2ccd8" text-anchor="middle">01 &#183; Wanted</text>
+    <rect x="146" y="0" width="120" height="40" rx="8" fill="#161b24" stroke="#2a3340"/>
+    <text x="206" y="25" fill="#7fb3ff" text-anchor="middle">02 &#183; Trying</text>
+    <rect x="278" y="0" width="112" height="40" rx="8" fill="#161b24" stroke="#2a3340"/>
+    <text x="334" y="25" fill="#7ee0a3" text-anchor="middle">03 &#183; Kept</text>
+    <rect x="402" y="0" width="132" height="40" rx="8" fill="#161b24" stroke="#2a3340"/>
+    <text x="468" y="25" fill="#f0b866" text-anchor="middle">04 &#183; Serving</text>
+    <rect x="546" y="0" width="126" height="40" rx="8" fill="#161b24" stroke="#2a3340"/>
+    <text x="609" y="25" fill="#e06a5a" text-anchor="middle">05 &#183; Retired</text>
+    <path d="M132 20 h14 M266 20 h12 M390 20 h12 M534 20 h12" stroke="#3a4553" stroke-width="1.5"/>
+  </g>
+
+  <!-- chips right -->
+  <g transform="translate(980,330)" font-size="13.5" font-weight="600" text-anchor="middle">
+    <rect x="0" y="0" width="86" height="30" rx="15" fill="#161b24" stroke="#2a3340"/>
+    <text x="43" y="20" fill="#a7b3c2">MIT</text>
+    <rect x="96" y="0" width="118" height="30" rx="15" fill="#161b24" stroke="#2a3340"/>
+    <text x="155" y="20" fill="#a7b3c2">TypeScript</text>
+    <rect x="0" y="-40" width="214" height="30" rx="15" fill="#1a130c" stroke="#5a3a1e"/>
+    <text x="107" y="-20" fill="#f0883e">Docker-sandboxed trials</text>
+  </g>
+
+  <rect x="72" y="404" width="640" height="2" rx="1" fill="url(#fade)"/>
+</svg>

@@ -116,7 +116,12 @@ export function previewUpdate(
 
     const installs = selectInstallations(db, toolId);
     const dir = diskInstallPath(db, toolId);
-    if (!dir) return fail(`tool ${toolId} has no present disk installation`);
+    if (!dir) {
+      return fail(
+        `${tool.name} is not checked out on this machine, so there is no git checkout to fast-forward. ` +
+          `A global CLI updates through its package manager; a container-only clone is replaced by cloning again.`,
+      );
+    }
 
     const inst = installs.find(i => i.present === 1 && !['npm-g', 'winget', 'skills-dir'].includes(i.where_));
     const preview: UpdatePreview = {
@@ -571,12 +576,57 @@ function extractDockerRun(readme: string): string | null {
 
 const README_NAMES = ['README.md', 'readme.md', 'Readme.md', 'README.markdown', 'README.txt', 'README'];
 
+/**
+ * Explain a missing docker recipe instead of just reporting its absence.
+ *
+ * Verified against legion-warden: an Electron app with no Dockerfile and no
+ * compose file. The old message ("no docker run instructions found") read like
+ * OSM had failed to look properly, when the truth is that the repo has no
+ * container story at all — and for a desktop app it never will.
+ */
+function noRecipeReason(name: string, dir: string): string {
+  const checked = 'docker-compose.yml / compose.yaml, a `docker run` line in the README, and a Dockerfile';
+  let kind = '';
+  try {
+    const pkgPath = join(dir, 'package.json');
+    if (existsSync(pkgPath)) {
+      const raw = readFileSync(pkgPath, 'utf8');
+      const pkg = JSON.parse(raw) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        bin?: unknown;
+        main?: unknown;
+      };
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (deps.electron || deps['electron-vite'] || deps['electron-builder']) {
+        kind =
+          ' This is an Electron desktop app — it wants a window and your GPU, so Docker is not how it runs. Use "Open in Windows" and its own start script instead.';
+      } else if (deps.react || deps.vite || deps.next) {
+        kind =
+          ' It looks like a web front end: it expects a dev server (npm run dev), not a container image.';
+      } else if (pkg.bin !== undefined) {
+        kind = ' It declares a CLI bin, so it is meant to be installed and run directly, not containerised.';
+      }
+    } else if (existsSync(join(dir, 'pyproject.toml')) || existsSync(join(dir, 'requirements.txt'))) {
+      kind = ' It is a Python project with no container recipe — a venv is how its own docs will run it.';
+    }
+  } catch {
+    // package.json unreadable or malformed: fall through to the plain reason.
+  }
+  return `${name} ships no container recipe. OSM looked for ${checked} in ${dir} and found none, and it never invents a command a repo did not document.${kind}`;
+}
+
 export function planTrial(db: Db, toolId: number): OpResult<TrialPlan> {
   try {
     const tool = selectTool(db, toolId);
     if (!tool) return fail(`tool ${toolId} not found`);
     const dir = diskInstallPath(db, toolId);
-    if (!dir) return fail(`tool ${toolId} has no present disk installation to scan`);
+    if (!dir) {
+      return fail(
+        `${tool.name} is not checked out on this machine, so there is nothing to read a run command from. ` +
+          `Clone it into a container first (Actions ▾ → Clone into container) — that leaves no files on your disk.`,
+      );
+    }
 
     const plan: TrialPlan = {
       ok_to_run: false,
@@ -626,7 +676,10 @@ export function planTrial(db: Db, toolId: number): OpResult<TrialPlan> {
       return ok(`trial of ${tool.name} refused: ${plan.refusals[0]}`, plan);
     }
 
-    return fail(`no docker run instructions found in README/compose/Dockerfile for ${tool.name}`);
+    // "Not found" is not an answer to "why can't I try this?". Say what was
+    // looked for, and name the reason when the repo simply is not a container
+    // workload — a desktop app has no docker story to find.
+    return fail(noRecipeReason(tool.name, dir));
   } catch (err) {
     return fail(`plan_trial failed: ${String(err)}`);
   }
