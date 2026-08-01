@@ -177,8 +177,9 @@ test('getReadme: github unreachable but a checkout exists → falls back to the 
 
   const res = await getReadme(db, id, { fetchImpl });
   assert.equal(res.ok, true);
-  assert.equal(res.data!.format, 'text');
-  assert.match(res.data!.body, /# local copy/);
+  // Local markdown renders as markdown now, so the fallback is HTML too.
+  assert.equal(res.data!.format, 'html');
+  assert.match(res.data!.body, /<h1>local copy<\/h1>/);
   db.close();
 });
 

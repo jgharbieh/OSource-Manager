@@ -333,12 +333,12 @@ test('Phase-2 read-only routes pass OpResult through without a token (non-github
   const preview = await api(base, `/api/tools/${id}/preview-update`);
   assert.equal(preview.status, 200);
   assert.equal(preview.body.ok, false);
-  assert.match(preview.body.message, /no present disk installation/);
+  assert.match(preview.body.message, /not checked out on this machine/);
 
   const plan = await api(base, `/api/tools/${id}/plan-trial`);
   assert.equal(plan.status, 200);
   assert.equal(plan.body.ok, false);
-  assert.match(plan.body.message, /no present disk installation/);
+  assert.match(plan.body.message, /not checked out on this machine/);
 
   const missing = await api(base, '/api/tools/999/upstream');
   assert.equal(missing.status, 200);

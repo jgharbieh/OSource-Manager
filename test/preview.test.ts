@@ -351,7 +351,7 @@ test('planTrial: no docker instructions anywhere → ok:false', () => {
   const res = planTrial(db, id);
 
   assert.equal(res.ok, false);
-  assert.match(res.message, /no docker run instructions found/);
+  assert.match(res.message, /ships no container recipe/);
 
   db.close();
 });

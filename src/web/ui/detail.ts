@@ -17,6 +17,7 @@ import {
   getUpstream,
   patchTool,
   postComment,
+  mergeTools,
   setUpstream,
   type Op,
 } from './api.js';
@@ -34,6 +35,7 @@ import {
   errToast,
   fmtStamp,
   loadingState,
+  openFlow,
   looksBlocked,
   looksEmptyNotBroken,
   msgOf,
@@ -114,10 +116,54 @@ async function askUpstream(t: ToolDetail): Promise<void> {
   if (url === null || url.trim() === '') return;
   try {
     const res = await setUpstream(t.id, url.trim());
+    if (res.ok) {
+      toast(res.message);
+      await handlers.reload?.();
+      return;
+    }
+    // The repo is already on the shelf under another row — which is the normal
+    // case for something like agent-browser, where the same upstream ships a
+    // CLI and a skill and discovery found each separately. Offer the merge
+    // instead of leaving him at a dead end. The id comes out of OSM's own
+    // message, not third-party text.
+    const clash = /\(#(\d+)\)/.exec(res.message);
+    if (clash) {
+      await offerMerge(t, Number(clash[1]), res.message);
+      return;
+    }
     toast(res.message);
-    if (res.ok) await handlers.reload?.();
   } catch (e) {
     errToast(e);
+  }
+}
+
+/** Confirm folding this row into the one that already owns the repo. */
+async function offerMerge(t: ToolDetail, intoId: number, why: string): Promise<void> {
+  const target = state.tools.find((x) => x.id === intoId);
+  const dlg = openFlow(`Merge ${t.name}`);
+  try {
+    const ans = await dlg.ask({
+      lead: why,
+      consequences: [
+        `"${t.name}" becomes an installation of ${target?.name ?? `tool #${intoId}`} — one row, one upstream, every place it is installed listed under it`,
+        'installations, tags, aliases, MCP registrations and the whole journal move across',
+        'the surviving row keeps its own verdict and "why"; yours is adopted only if it had none',
+        'this row is then removed — a duplicate identity is not something to retire, it should stop existing',
+      ],
+      confirmLabel: 'Merge them',
+    });
+    if (!ans.confirmed) return;
+    dlg.working('moving installations, tags and the journal…');
+    const merged = await mergeTools(t.id, intoId);
+    await dlg.report({ ok: merged.ok, message: merged.message });
+    if (merged.ok) {
+      handlers.closeDetail?.();
+      await handlers.reload?.();
+    }
+  } catch (e) {
+    await dlg.report({ ok: false, message: msgOf(e), lead: 'Nothing was merged.' });
+  } finally {
+    dlg.close();
   }
 }
 

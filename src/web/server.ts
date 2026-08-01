@@ -33,6 +33,7 @@ import {
   setUpstreamOp,
   autoUpdateSweepOp,
   cloneIntoSandboxOp,
+  mergeToolsOp,
   type SearchQuery,
   type TrackInput,
 } from '../core/ops.js';
@@ -499,6 +500,15 @@ export async function createOsmServer(
       if (method === 'POST' && id !== undefined && segments[3] === 'try' && segments.length === 4) {
         const body = await parseJsonBody(req);
         sendJson(res, 200, await tryItOp(db, id, { confirm: boolField(body, 'confirm') }));
+        return;
+      }
+      // POST /api/tools/:id/merge { intoId } — same tool found twice
+      if (method === 'POST' && id !== undefined && segments[3] === 'merge' && segments.length === 4) {
+        const body = await parseJsonBody(req);
+        if (typeof body.intoId !== 'number' || !Number.isInteger(body.intoId) || body.intoId <= 0) {
+          throw new HttpError(400, 'intoId must be a positive integer tool id');
+        }
+        sendJson(res, 200, mergeToolsOp(db, id, body.intoId));
         return;
       }
       // POST /api/tools/:id/clone { fullHistory? } — clone into a container,

@@ -460,7 +460,9 @@ export function setUpstreamOp(db: Db, toolId: number, url: string): OpResult<Too
     const clash = selectToolByCanonicalKey(db, key);
     if (clash && clash.id !== toolId) {
       return fail(
-        `${key} is already on the shelf as "${clash.name}" (#${clash.id}) — retire one of the two instead of pointing both at it`,
+        `${key} is already on the shelf as "${clash.name}" (#${clash.id}). If they are the same tool ` +
+          `(one repo shipping a CLI and a skill, say), merge this row into it — that keeps one row with ` +
+          `both installations under it. Two rows cannot own one upstream.`,
       );
     }
 
@@ -482,6 +484,87 @@ export function setUpstreamOp(db: Db, toolId: number, url: string): OpResult<Too
     });
   } catch (err) {
     return fail(`set upstream failed: ${String(err)}`);
+  }
+}
+
+/**
+ * Fold one row into another — they were always the same tool.
+ *
+ * agent-browser is the case that forced this: it is ONE upstream repo that
+ * ships a CLI (npm -g) and a skill (a directory under a skills dir), so
+ * discovery found it three ways and made three rows. The schema already models
+ * this correctly — one `tools` row, many `installations` — there was just no way
+ * to say "these are the same thing" after the fact.
+ *
+ * The target keeps its identity and its owned fields; everything observable
+ * moves. The source row is deleted, because a duplicate identity is not a
+ * retirement: retiring it would leave a permanent fake row on the shelf.
+ */
+export function mergeToolsOp(db: Db, fromId: number, intoId: number): OpResult<ToolView> {
+  try {
+    if (fromId === intoId) return fail('a tool cannot be merged into itself');
+    const from = selectTool(db, fromId);
+    const into = selectTool(db, intoId);
+    if (!from) return fail(`tool ${fromId} not found`);
+    if (!into) return fail(`tool ${intoId} not found`);
+
+    return withTransaction(db, () => {
+      // Observable facts move wholesale.
+      db.prepare('UPDATE installations SET tool_id = ? WHERE tool_id = ?').run(intoId, fromId);
+      db.prepare('UPDATE comments SET tool_id = ? WHERE tool_id = ?').run(intoId, fromId);
+      db.prepare('UPDATE trials SET tool_id = ? WHERE tool_id = ?').run(intoId, fromId);
+
+      // These carry a uniqueness constraint per (tool, X): insert-or-ignore,
+      // then drop whatever is left on the source.
+      db.prepare('INSERT OR IGNORE INTO aliases (tool_id, alias) SELECT ?, alias FROM aliases WHERE tool_id = ?')
+        .run(intoId, fromId);
+      db.prepare('DELETE FROM aliases WHERE tool_id = ?').run(fromId);
+      db.prepare(
+        'INSERT OR IGNORE INTO tags (tool_id, tag, detected) SELECT ?, tag, detected FROM tags WHERE tool_id = ?',
+      ).run(intoId, fromId);
+      db.prepare('DELETE FROM tags WHERE tool_id = ?').run(fromId);
+      db.prepare(
+        `INSERT OR IGNORE INTO mcp_registrations (tool_id, target, server_name, registered_at)
+         SELECT ?, target, server_name, registered_at FROM mcp_registrations WHERE tool_id = ?`,
+      ).run(intoId, fromId);
+      db.prepare('DELETE FROM mcp_registrations WHERE tool_id = ?').run(fromId);
+
+      // The source's canonical key is how it was found; keep it findable.
+      addAlias(db, intoId, from.canonical_key);
+
+      // Observations are derived, but the merged row genuinely serves in more
+      // places, so serving/trial state is the union until the next refresh.
+      const a = selectObservations(db, fromId);
+      const b = selectObservations(db, intoId);
+      if (a) {
+        upsertObservations(db, intoId, {
+          serving_count: Math.max(a.serving_count, b?.serving_count ?? 0),
+          trial_running: a.trial_running === 1 || b?.trial_running === 1 ? 1 : 0,
+        });
+      }
+      db.prepare('DELETE FROM observations WHERE tool_id = ?').run(fromId);
+
+      // A "why" is expensive to write and cheap to lose. Never overwrite one.
+      if (!into.why_i_want_it && from.why_i_want_it) {
+        db.prepare('UPDATE tools SET why_i_want_it = ?, updated_at = ? WHERE id = ?')
+          .run(from.why_i_want_it, now(), intoId);
+      }
+      if (into.favorite !== 1 && from.favorite === 1) {
+        db.prepare('UPDATE tools SET favorite = 1, updated_at = ? WHERE id = ?').run(now(), intoId);
+      }
+
+      db.prepare('DELETE FROM tools WHERE id = ?').run(fromId);
+      addEvent(
+        db,
+        intoId,
+        `merged "${from.name}" (#${fromId}, ${from.canonical_key}) into this row — same tool, ` +
+          `found ${from.source ? `via ${from.source}` : 'separately'}; its installations, tags and journal moved here`,
+      );
+      const view = viewOrFail(db, intoId);
+      return ok(`merged ${from.name} into ${into.name}`, view ?? undefined);
+    });
+  } catch (err) {
+    return fail(`merge failed: ${String(err)}`);
   }
 }
 

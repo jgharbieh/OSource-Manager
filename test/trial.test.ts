@@ -158,7 +158,7 @@ test('tryIt on a tool with no docker instructions fails cleanly', async () => {
   const res = await tryIt(db, t.id, { confirm: true });
 
   assert.equal(res.ok, false);
-  assert.match(res.message, /no docker run instructions found/);
+  assert.match(res.message, /ships no container recipe/);
   assert.equal(trialCount(db, t.id), 0);
   db.close();
 });

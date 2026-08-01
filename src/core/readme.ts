@@ -20,10 +20,11 @@
  * that arrives over the wire.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { OpResult } from './types.js';
 import { type Db, selectInstallations, selectTool } from './db.js';
 import { resolveGithub } from './resolve.js';
+import { frontmatterHtml, renderMarkdown } from './markdown.js';
 
 export interface ReadmeDoc {
   /** 'html' = safe-to-inject markup. 'text' = must be escaped by the caller. */
@@ -218,9 +219,26 @@ export async function getReadme(
     if (file) {
       try {
         const { body, truncated } = clamp(readFileSync(file, 'utf8'));
+        // Markdown renders as markdown. A skill's whole documentation is its
+        // SKILL.md, so showing it as raw text was showing the source instead of
+        // the doc — frontmatter and all.
+        if (/\.(md|markdown)$/i.test(file)) {
+          const md = renderMarkdown(body);
+          return {
+            ok: true,
+            message: `${basename(file)} from the checkout at ${file}`,
+            data: {
+              format: 'html',
+              body: frontmatterHtml(md.frontmatter) + md.html,
+              source: file,
+              url: null,
+              truncated,
+            },
+          };
+        }
         return {
           ok: true,
-          message: `README from the checkout at ${file}`,
+          message: `${basename(file)} from the checkout at ${file}`,
           data: { format: 'text', body, source: file, url: null, truncated },
         };
       } catch (err) {

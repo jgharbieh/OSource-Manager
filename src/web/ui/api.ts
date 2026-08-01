@@ -232,6 +232,11 @@ export async function setUpstream(id: number, url: string): Promise<Op<ToolView>
   return reqOp<ToolView>('POST', `/api/tools/${id}/upstream`, { url });
 }
 
+/** Fold `id` into `intoId` — they are the same tool found twice. */
+export async function mergeTools(id: number, intoId: number): Promise<Op<ToolView>> {
+  return reqOp<ToolView>('POST', `/api/tools/${id}/merge`, { intoId });
+}
+
 export async function runAutoUpdate(): Promise<Op<AutoUpdateSweep>> {
   return reqOp<AutoUpdateSweep>('POST', '/api/auto-update/run', {});
 }
