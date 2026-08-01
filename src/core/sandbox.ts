@@ -63,6 +63,8 @@ export interface SandboxResult {
   /** Ready to paste: opens a shell in the clone. */
   exec_hint: string;
   clone_output: string;
+  /** The isolation actually applied, so the UI states facts, not intentions. */
+  isolation: string[];
 }
 
 function ok<T>(message: string, data?: T): OpResult<T> {
@@ -80,6 +82,46 @@ function slugOf(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
   return s === '' ? 'repo' : s;
+}
+
+/**
+ * The argv for the inspect container. Pure and exported so the isolation is
+ * covered by a test: these flags ARE the security boundary, and a future edit
+ * that quietly drops one would otherwise pass every existing test while turning
+ * the sandbox back into an ordinary container.
+ */
+export function inspectRunArgv(a: {
+  container: string;
+  volume: string;
+  uid: string;
+  path: string;
+}): string[] {
+  return [
+    'run', '-d',
+    '--name', a.container,
+    // Read-only mount: what is read is what was cloned.
+    '-v', `${a.volume}:${WORKDIR}:ro`,
+    '--label', `osm.trial=${a.uid}`,
+    // No interface at all — nothing in the repo can phone home or pull a second
+    // stage. The clone happened in a separate container that had network.
+    '--network', 'none',
+    // A writable rootfs is a persistence foothold; /tmp is a noexec tmpfs so a
+    // shell still works.
+    '--read-only',
+    '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
+    // Reading files needs no capability, and a setuid binary must not escalate.
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
+    // nobody. The clone is root-owned but world-readable: reads work, writes don't.
+    '--user', '65534:65534',
+    // A fork bomb or a miner in a postinstall hits a wall.
+    '--pids-limit', '256',
+    '--memory', '512m',
+    '--workdir', a.path,
+    '--entrypoint', 'sleep',
+    GIT_IMAGE,
+    'infinity',
+  ];
 }
 
 /**
@@ -169,20 +211,28 @@ export async function cloneIntoSandbox(
 
     // Idle container so the clone is reachable (docker exec / the Log tab) and
     // so teardown has something concrete to remove.
-    const up = await docker(
-      bin,
-      [
-        'run', '-d',
-        '--name', container,
-        '-v', `${volume}:${WORKDIR}`,
-        '--label', `osm.trial=${uid}`,
-        '--workdir', path,
-        '--entrypoint', 'sleep',
-        GIT_IMAGE,
-        'infinity',
-      ],
-      timeout,
-    );
+    //
+    // INSPECT MODE. This container exists to be READ — by a human or by an
+    // agent — and the code in it is untrusted by definition. So it gets the
+    // whole set:
+    //
+    //   --network none   nothing can phone home, exfiltrate, or pull a second
+    //                    stage. The clone already happened in a separate
+    //                    container that had network; this one never needs it,
+    //                    and with no interface there is nothing to egress over.
+    //   :ro on /src      the source cannot be modified, so what is read is what
+    //                    was cloned.
+    //   --read-only      writable rootfs is a persistence foothold. /tmp is a
+    //                    tmpfs so a shell still works.
+    //   --cap-drop ALL   no capability is needed to read files.
+    //   no-new-privileges  a setuid binary in the repo cannot escalate.
+    //   --user 65534     nobody. The clone is root-owned but world-readable, so
+    //                    reading works and writing does not.
+    //   pids/memory      a fork bomb or miner in a postinstall hits a wall.
+    //
+    // Still true, and the strongest guarantee here: no host path is mounted, so
+    // the host filesystem, the SSH keys and every .env are simply not present.
+    const up = await docker(bin, inspectRunArgv({ container, volume, uid, path }), timeout);
     if (!up.ok) {
       await undo();
       return fail(`cloned, but the source container would not start: ${up.error ?? 'unknown error'}`);
@@ -202,6 +252,14 @@ export async function cloneIntoSandbox(
       image_created_by_osm: imageOwned ? 1 : 0,
       exec_hint: `docker exec -it ${container} sh`,
       clone_output: (cloned.stderr || cloned.stdout).trim(),
+      isolation: [
+        'no network interface at all (--network none) — nothing in the repo can reach the internet or your LAN',
+        'no host path is mounted: your filesystem, SSH keys and every .env are not present in there',
+        'the source is mounted read-only; the container root filesystem is read-only too (/tmp is a 64M tmpfs, noexec)',
+        'runs as nobody (65534) with every Linux capability dropped and no-new-privileges set',
+        'capped at 512M and 256 processes',
+        'nothing from the repo has been executed — git cloned files, it did not run them',
+      ],
     };
 
     withTransaction(db, () => {

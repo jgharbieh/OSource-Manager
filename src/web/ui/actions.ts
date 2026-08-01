@@ -128,11 +128,13 @@ export async function cloneFlow(t: ToolView): Promise<void> {
   const dlg = openFlow(`Clone ${t.name} into a container`);
   try {
     const ans = await dlg.ask({
-      lead: 'The checkout goes into a Docker volume, not onto your disk — so an untried repo cannot silently become clutter.',
+      lead: 'Untrusted code, read at arm’s length: the checkout goes into a Docker volume, and the container holding it has no network and no access to this machine.',
       consequences: [
-        'a named volume is created and labelled osm.trial=<uid>, and git clone --depth 1 runs inside a container',
-        'nothing is written to this machine’s filesystem — there is no host path to clean up',
-        'the source container idles (sleep infinity); none of the repo’s own code is executed',
+        'git clone --depth 1 runs in a container; nothing is written to this machine’s filesystem',
+        'the container that keeps the source has NO network interface — nothing in the repo can phone home',
+        'no host path is mounted: your filesystem, SSH keys and .env files are not present in there',
+        'source read-only, rootfs read-only, runs as nobody, every capability dropped, 512M / 256 procs',
+        'none of the repo’s code is executed — cloning writes files, it does not run them',
         'Tear down removes the volume, the container, and the git image only if OSM pulled it',
       ],
       confirmLabel: 'Clone it in Docker',
@@ -150,6 +152,9 @@ export async function cloneFlow(t: ToolView): Promise<void> {
           `image:     ${d.image}${d.image_created_by_osm ? ' (pulled by OSM — teardown removes it)' : ' (already here — teardown keeps it)'}`,
           '',
           `open a shell:  ${d.exec_hint}`,
+          '',
+          'isolation applied:',
+          ...d.isolation.map((x) => `  · ${x}`),
           '',
           d.entries.length > 0 ? `cloned files: ${d.entries.slice(0, 24).join('  ')}` : '(the clone reported no files)',
         ].join('\n')
