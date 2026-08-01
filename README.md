@@ -49,6 +49,16 @@ node dist/cli.js serve      # web UI at http://localhost:7807
 
 First run scans your configured dirs, package managers (`npm -g`, winget), agent configs and `docker ps`, and imports what it finds. Nothing leaves your machine.
 
+### Windows: make it a clickable app
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-app.ps1 -Path
+```
+
+Adds a Start Menu + Desktop shortcut (press <kbd>Win</kbd>, type *OSource*) pointing at `OSource-Manager.cmd`, generates an icon, and `-Path` puts the repo on your user PATH so `osm <command>` works in any new terminal. No admin rights, no packaging — the launcher builds on first run, starts the server and opens your browser. Clicking it twice doesn't start a second server: `serve --open` probes `/api/health` and just re-opens the tab.
+
+The minimized console window it owns **is** the server — close it to stop OSM. Undo everything with `scripts\install-app.ps1 -Uninstall`.
+
 ## What it does
 
 <table>

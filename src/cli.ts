@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { openDb, selectToolViews } from './core/db.js';
 import { defaultDbPath, loadSettings } from './core/settings.js';
 import type { Settings } from './core/types.js';
@@ -10,7 +11,9 @@ import { startOsmMcpServer } from './mcp/server.js';
 const USAGE = `osm — OSource-Manager: local tool/source registry
 
 Usage:
-  osm serve [--port N]   Start the web UI + API server
+  osm serve [--port N] [--open]
+                         Start the web UI + API server (--open: launch the
+                         browser; if an instance is already up, just open it)
   osm mcp                Serve the MCP tools over stdio (for Claude Code, Codex, …)
   osm refresh            Scan the machine and refresh the registry
   osm tools [--json]     List tracked tools
@@ -84,9 +87,53 @@ async function refreshRegistry(db: Parameters<typeof runDiscovery>[0], settings:
   return report;
 }
 
+/** Hand a URL to the OS default browser. Detached — the server keeps the terminal. */
+function openBrowser(url: string): void {
+  const [file, args] =
+    process.platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : process.platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
+  try {
+    spawn(file as string, args as string[], { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // best effort — the URL is printed either way
+  }
+}
+
+/**
+ * Is an OSM already serving on this port? Single-instance check for the desktop
+ * launcher: clicking the shortcut twice should focus the app, not fail on
+ * EADDRINUSE. Only a real OSM answers `/api/health` with `{ok:true}` — some
+ * other process squatting the port fails the probe and we go on to bind (and
+ * report the bind error honestly).
+ */
+async function osmAlreadyServing(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { ok?: unknown };
+    return body.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 async function cmdServe(args: string[]): Promise<void> {
   const settings = loadSettings();
   const port = parsePort(args) ?? settings.port;
+  const open = args.includes('--open');
+
+  if (open && (await osmAlreadyServing(port))) {
+    const url = `http://127.0.0.1:${port}`;
+    process.stdout.write(`OSM is already running → ${url}\n`);
+    openBrowser(url);
+    return;
+  }
+
   const db = openDb(defaultDbPath());
   const handle = await createOsmServer(db, settings, {
     port,
@@ -95,6 +142,7 @@ async function cmdServe(args: string[]): Promise<void> {
 
   process.stdout.write(`OSM UI → http://127.0.0.1:${handle.port}\n`);
   process.stdout.write(`Per-run token: ${handle.token}\n`);
+  if (open) openBrowser(`http://127.0.0.1:${handle.port}`);
 
   let shuttingDown = false;
   const shutdown = (): void => {

@@ -1,0 +1,6 @@
+# pnpm >=10 refuses to run a dependency's build scripts until it is listed here.
+# esbuild (via Vite) needs its postinstall to fetch the platform binary; without
+# this, `pnpm install` exits 1 with ERR_PNPM_IGNORED_BUILDS and the first-run
+# build in OSource-Manager.cmd never happens.
+allowBuilds:
+  esbuild: true
